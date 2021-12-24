@@ -1,0 +1,149 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(ipumsr)
+library(scales)
+library(tidysynth)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+data = read.csv('cps_00007.csv')
+
+ind_codes = c(0, 170, 180, 290)
+CA = 6
+
+faminc.code = c(100, 210, 300, 430, 470, 500, 600, 710, 720, 730, 740, 820, 830, 841, 842, 843)
+faminc.value = c(2500, 6250, 8750, 11250, 13750, 17500, 22500, 27500, 32500, 37500, 45000, 55000, 67500, 87500, 125000, 150000)
+map = setNames(faminc.code, faminc.value)
+
+workers = filter(data, (AHRSWORK1 != 999) & 
+                   (ASECFLAG %in% c(NA, 2)) &
+                   (AHRSWORK1 >= 40) &
+                   (YEAR %in% c(2018, 2020)))
+
+# CPS variables
+workers.cps = select(workers, year=YEAR, ind=IND, state=STATEFIP, hours=AHRSWORK1, cpswt=WTFINL)
+workers.cps$ind[workers.cps$ind %in% ind_codes] = 0 # merge all farming industries to code 0
+workers.cps$log_age = log(workers$AGE)
+workers.cps$highschool = ifelse(workers$EDUC >= 73, 1, 0)
+workers.cps$married = ifelse(workers$MARST == 1, 1, 0)
+workers.cps$notcitizen = ifelse(workers$CITIZEN == 5, 1, 0)
+workers.cps$male = ifelse(workers$SEX == 1, 1, 0)
+workers.cps$white = ifelse(workers$RACE == 100, 1, 0)
+workers.cps$hispanic = ifelse(workers$HISPAN != 0, 1, 0)
+workers.cps$city = ifelse(workers$METRO == 2, 1, 0)
+workers.cps$suburb = ifelse(workers$METRO > 2, 1, 0)
+workers.cps$log_faminc = log(faminc.value[match(workers$FAMINC,faminc.code)])
+
+# CPS rotation group variables
+workers.rot = select(workers, year=YEAR, ind=IND, state=STATEFIP, rotwt=EARNWT)
+workers.rot$ind[workers.rot$ind %in% ind_codes] = 0
+workers.rot$log_hourlywage = log(workers$HOURWAGE)
+workers.rot$union = workers$UNION
+workers.rot$union[workers$union == 0] = NA
+workers.rot$union[workers$union == 1] = 0
+workers.rot$union[workers$union > 1] = 1
+workers$paidhourly = workers$PAIDHOUR
+workers$paidhourly[workers$paidhourly == 0] = NA
+workers$paidhourly[workers$paidhourly == 1] = 0
+workers$paidhourly[workers$paidhourly == 2] = 1
+
+# Aggregate and weight data
+workers.cps.agg = setDT(workers.cps)[,lapply(.SD, weighted.mean, cpswt, na.rm=T), by=.(year, state, ind)]
+workers.rot.agg = setDT(workers.rot)[,lapply(.SD, weighted.mean, rotwt, na.rm=T), by=.(year, state, ind)]
+workers.agg = merge(workers.cps.agg, workers.rot.agg, by=c('year', 'ind', 'state'))
+
+# Add regression variables
+workers.agg$treated_ind = ifelse(workers.agg$ind %in% ind_codes, 1, 0)
+workers.agg$treated_state = ifelse(workers.agg$state == CA, 1, 0)
+workers.agg$treated = workers.agg$treated_ind*workers.agg$treated_state
+workers.agg$time = ifelse(workers.agg$year >= 2019, 1, 0)
+workers.agg$ind_time = workers.agg$treated_ind*workers.agg$time
+workers.agg$state_time = workers.agg$treated_state*workers.agg$time
+workers.agg$did = workers.agg$treated_ind*workers.agg$treated_state*workers.agg$time
+
+# Keep only industries which have data for all years
+ind_set = unique(workers.agg$ind)
+for (y in unique(workers.agg$year)) {
+  ind_set = intersect(ind_set, filter(workers.agg, year==y)$ind)
+}
+ind_set = setdiff(ind_set, c(280))
+workers.agg = filter(workers.agg, ind %in% ind_set)
+
+# Keep only states which have data for all years
+state_set = unique(workers.agg$state)
+for (y in unique(workers.agg$year)) {
+  state_set = intersect(state_set, filter(workers.agg, year==y)$state)
+}
+workers.agg = filter(workers.agg, state %in% state_set)
+
+didreg = lm(hours ~ treated_ind+treated_state+treated+time+ind_time+state_time+did, data=workers.agg)
+summary(didreg)
+
+# Synthetic control
+workers.out <-
+  workers.agg %>%
+  # initial the synthetic control object
+  synthetic_control(outcome = hours, # outcome
+                    unit = ind, # unit index in the panel data
+                    time = year, # time index in the panel data
+                    i_unit = 0, # unit where the intervention occurred
+                    i_time = 2018, # time period when the intervention occurred
+                    generate_placebos=T # generate placebo synthetic controls (for inference)
+  ) %>%
+  # Generate the aggregate predictors used to fit the weights
+  # generate_predictor(time_window = 2016:2018,
+  #                    log_age = mean(log_age, na.rm = T),
+  #                    highschool = mean(highschool, na.rm = T),
+  #                    married = mean(married, na.rm = T),
+  #                    notcitizen = mean(notcitizen, na.rm = T),
+  #                    male = mean(male, na.rm = T),
+  #                    white = mean(white, na.rm = T),
+  #                    hispanic = mean(hispanic, na.rm = T),
+  #                    city = mean(city, na.rm = T),
+  #                    suburb = mean(suburb, na.rm = T),
+#                    log_faminc = mean(log_faminc, na.rm = T),
+#                    union = mean(union, na.rm = T),
+#                    log_hourlywage = mean(log_hourlywage, na.rm = T)) %>%
+generate_predictor(time_window = 2003,
+                   hours_2003 = hours) %>%
+  generate_predictor(time_window = 2004,
+                     hours_2004 = hours) %>%
+  generate_predictor(time_window = 2005,
+                     hours_2005 = hours) %>%
+  generate_predictor(time_window = 2006,
+                     hours_2006 = hours) %>%
+  generate_predictor(time_window = 2007,
+                     hours_2007 = hours) %>%
+  generate_predictor(time_window = 2008,
+                     hours_2008 = hours) %>%
+  generate_predictor(time_window = 2009,
+                     hours_2009 = hours) %>%
+  generate_predictor(time_window = 2010,
+                     hours_2010 = hours) %>%
+  generate_predictor(time_window = 2011,
+                     hours_2011 = hours) %>%
+  generate_predictor(time_window = 2012,
+                     hours_2012 = hours) %>%
+  generate_predictor(time_window = 2013,
+                     hours_2013 = hours) %>%
+  generate_predictor(time_window = 2014,
+                     hours_2014 = hours) %>%
+  generate_predictor(time_window = 2015,
+                     hours_2015 = hours) %>%
+  generate_predictor(time_window = 2016,
+                     hours_2016 = hours) %>%
+  generate_predictor(time_window = 2017,
+                     hours_2017 = hours) %>%
+  generate_predictor(time_window = 2018,
+                     hours_2018 = hours) %>%
+  # Generate the fitted weights for the synthetic control
+  generate_weights(optimization_window = 2003:2018, # time to use in the optimization task
+                   margin_ipop = .02,sigf_ipop = 7,bound_ipop = 6 # optimizer options
+  ) %>%
+  # Generate the synthetic control
+  generate_control()
+workers.out %>% plot_trends()
+workers.out %>% plot_weights()
+workers.out %>% plot_placebos()
+workers.out %>% plot_mspe_ratio()

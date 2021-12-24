@@ -1,0 +1,290 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(lmtest)
+library(seas)
+library(Synth)
+library(SCtools)
+library(here)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv(here("data", "california.csv"))
+farmer_data = read.csv(here("data", "farmers.csv"))
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+occ = 'OCC'
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+set_min_wage = function(df, level) {
+  df$MINWAGE = 999.99
+  df$MINWAGE[df$YEAR == 2007] = 7.5
+  df$MINWAGE[df$YEAR %in% 2008:2013] = 8
+  df$MINWAGE[(df$YEAR == 2014) & (df$MONTH < 7)] = 8
+  df$MINWAGE[(df$YEAR == 2014) & (df$MONTH >= 7)] = 9
+  df$MINWAGE[df$YEAR == 2015] = 9
+  df$MINWAGE[df$YEAR == 2016] = 10
+  if (level == 1) {
+    df$MINWAGE[df$YEAR == 2017] = 10
+    df$MINWAGE[df$YEAR == 2018] = 10.5
+    df$MINWAGE[df$YEAR == 2019] = 11
+    df$MINWAGE[df$YEAR == 2020] = 12
+    df$MINWAGE[df$YEAR == 2021] = 13
+  } else {
+    df$MINWAGE[df$YEAR == 2017] = 10.5
+    df$MINWAGE[df$YEAR == 2018] = 11
+    df$MINWAGE[df$YEAR == 2019] = 12
+    df$MINWAGE[df$YEAR == 2020] = 13
+    df$MINWAGE[df$YEAR == 2021] = 14
+  }
+  return(df)
+}
+
+set_earnings = function(df) {
+  df$STANDARDHOURS = 40
+  df$STANDARDHOURS[(df$YEAR <= 2018) & (df$ID == '1-6050')] = 60
+  df$STANDARDHOURS[(df$YEAR == 2019) & (df$ID == '1-6050')] = 55
+  df$STANDARDHOURS[(df$YEAR == 2020) & (df$ID == '1-6050')] = 50
+  df$STANDARDHOURS[(df$YEAR == 2021) & (df$ID == '1-6050')] = 45
+  df$STANDARDHOURS[(df$YEAR == 2021) & (df$OCC == 9130)] = 999
+  
+  df$EARNINGS = 0
+  df$EARNINGS = df$HOURWAGE * df$AHRSWORK1
+  df[df$AHRSWORK1 > df$STANDARDHOURS,]$EARNINGS = df[df$AHRSWORK1 > df$STANDARDHOURS,]$EARNINGS +
+    0.5 * df[df$AHRSWORK1 > df$STANDARDHOURS,]$HOURWAGE *
+    (df[df$AHRSWORK1 > df$STANDARDHOURS,]$AHRSWORK1 - df[df$AHRSWORK1 > df$STANDARDHOURS,]$STANDARDHOURS)
+  return(df)
+}
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999, AHRSWORK1 > 0)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'EARNINGS') {
+    df = filter(df, HOURWAGE != 999.99,
+                AHRSWORK1 != 999,
+                AHRSWORK1 > 0)
+    df = set_earnings(df)
+    df$DEPVAR = df$EARNINGS
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNINGS') {
+    df = filter(df, HOURWAGE != 999.99,
+                AHRSWORK1 != 999,
+                AHRSWORK1 > 0)
+    df = set_earnings(df)
+    df$DEPVAR = log(df$EARNINGS)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = df$HOURWAGE
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'OTPAY') {
+    df = filter(df, OTPAY != 99)
+    df$DEPVAR = ifelse(df$OTPAY == 2, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'MULTJOB') {
+    df = filter(df, MULTJOB != 0)
+    df$DEPVAR = ifelse(df$MULTJOB == 2, 1, 0)
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'MINWAGE1') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'MINWAGE2') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 2)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  else if (dep_var == 'BELOW_MINWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df$DEPVAR = ifelse(df$HOURWAGE < df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+remove_id = function(df) {
+  id_set = unique(df$ID)
+  for (y in unique(df$YEAR)) {
+    id_set = intersect(id_set, filter(df, YEAR == y)$ID)
+  }
+  df = filter(df, ID %in% id_set)
+  return(df)
+}
+
+get_data = function(start_year, end_year, dep_var) {
+  df = filter(ca_data, (IND > 0) &
+                (OCC > 0) &
+                (YEAR >= start_year) &
+                (YEAR <= end_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  df = df %>% 
+      mutate(ID = group_indices_(df, .dots=c("IND", "OCC"))) 
+  df$ID_STR = sprintf("%d-%d", df$IND, df$OCC)
+  df = process_dep_var(df, dep_var)
+  return(df)
+}
+
+synth_control = function(dep_var,
+                         start_year, 
+                         end_year,
+                         min_sample_size) {
+  
+  df = get_data(start_year, end_year, dep_var)
+  treated_code = filter(df, ID_STR == '1-6050')$ID[1]
+  
+  # Remove units that don't have at least 25 observations
+  df = df %>%
+    group_by(YEAR, ID) %>%
+    filter(n() >= min_sample_size)
+  
+  # Aggregate by year and unit
+  df = setDT(df)[,lapply(.SD, weighted.mean, WEIGHT, na.rm=T), by=.(YEAR, ID, ID_STR)]
+  
+  df = filter(df, DEPVAR > 0)
+  
+  # Keep only units which have data for all years
+  df = remove_id(df)
+  
+  # Set control variables
+  control_codes = setdiff(unique(df$ID), treated_code)
+  
+  # Pre-treatment period
+  opt_window = start_year:2018
+  
+  # Set predictors as all except last pre-treatment outcome variable, which is done manually
+  sp_predictors = list()
+  for (i in 1:(length(opt_window)-1)) {
+    sp_predictors[[i]] = list('DEPVAR', opt_window[i], 'mean')
+  }
+  dataprep.out <- dataprep(foo = df,
+                           dependent = 'DEPVAR',
+                           predictors = 'DEPVAR',
+                           predictors.op = 'mean',
+                           time.predictors.prior = 2018,
+                           special.predictors = sp_predictors,
+                           unit.variable = 'ID',
+                           unit.names.variable = 'ID_STR',
+                           time.variable = 'YEAR',
+                           treatment.identifier = treated_code,
+                           controls.identifier = control_codes,
+                           time.optimize.ssr = opt_window,
+                           time.plot = start_year:end_year)
+  return(dataprep.out)
+}
+plot_path = function(df, title, x, y) {
+  df$DATE = make_date(df$YEAR, 1, 1)
+  p = ggplot(df, aes(x=DATE)) +
+    geom_line(size=2, aes(y=TREAT)) +
+    geom_line(size=2, linetype='dashed', aes(y=CONTROL)) +
+    scale_x_date(date_breaks = "years" , date_labels = "%Y") +
+    geom_vline(xintercept=make_date(2018,1,1), linetype='dashed') +
+    labs(title = title, x = x, y = y, color="Group") +
+    theme(text=element_text(family="serif"),
+          plot.margin = unit(c(1, 1, 1, 1), "cm"))
+  return(p)
+}
+
+dataprep.out = synth_control(dep_var = 'AHRSWORK1',
+                             start_year = 2007, 
+                             end_year = 2020,
+                             min_sample_size = 120)
+synth.out <- synth(dataprep.out, Sigf.ipop=3, strategy='multiprocess')
+
+df = data.frame(YEAR = 2007:2020)
+df$TREAT = dataprep.out$Y1plot
+df$CONTROL = dataprep.out$Y0plot%*% synth.out$solution.w
+p1 = plot_path(df, "Evolution of Hours for Treated vs Synthetic Control", "Year", "Hours")
+
+local({
+  on.exit(dev.off())
+  tikz('sc-hours-gaps.tex',
+       width = 8, 
+       height = 6)
+  # Plot paths of treated and synthetic
+  print(p1)
+})
+
+# Get result tables
+synth.tables <- synth.tab(
+  dataprep.res = dataprep.out,
+  synth.res = synth.out
+) 
+print(synth.tables)
+
+
+# Create placebos and test
+tdf <- generate.placebos(dataprep.out, synth.out, Sigf.ipop = 3, strategy='multiprocess')
+ratio <- mspe.test(tdf, discard.extreme = T, mspe.limit=1)
+ratio$p.val
+plot_placebos(tdf, discard.extreme = T, mspe.limit=1,xlab)
+mspe.plot(tdf, discard.extreme = T, mspe.limit=1)
+

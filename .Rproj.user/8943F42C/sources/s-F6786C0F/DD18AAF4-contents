@@ -1,0 +1,7 @@
+data_2019 = filter(ca_data, (AHRSWORK1 != 999) & 
+                     (YEAR == 2019) &
+                     (ASECFLAG %in% c(NA, 2)))
+data_2020 = filter(ca_data, (AHRSWORK1 != 999) & 
+                     (YEAR == 2020) &
+                     (ASECFLAG %in% c(NA, 2)))
+df = merge(data_2019, data_2020, by='CPSIDP', all=F)

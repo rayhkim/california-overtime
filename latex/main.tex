@@ -1,0 +1,203 @@
+\documentclass[12pt]{article}
+\usepackage{tikz,amsmath,textcomp,amssymb,geometry,
+enumerate,array,lscape,physics,bbm,graphicx,dcolumn,subcaption,adjustbox}
+\usepackage[nodisplayskipstretch]{setspace}
+\setstretch{2}
+
+\newcommand*{\mbb}[1]{\mathbb{#1}}
+\newcommand*{\mfk}[1]{\mathfrak{#1}}
+\newcommand*{\mc}[1]{\mathcal{#1}}
+\newcommand*{\msc}[1]{\mathscr{#1}}
+
+\newcommand*{\bL}{{\mc{L}}}
+
+\newcommand*{\ol}[1]{\overline{#1}}
+
+\newcommand*{\eps}{\varepsilon}
+\newcommand*{\iso}{\cong}
+
+
+\begin{document}
+\title{The Impact of Overtime Regulations on Hours Worked and Earnings in Agriculture: Evidence from California}
+\author{Ray Kim}
+\maketitle
+\begin{abstract}
+    In 2016, California became the first state to begin phasing a 40 hour work week with overtime for agricultural workers. I study the effect of this change in standard hours on hours worked, wages, and weekly earnings. Using difference-in-differences and synthetic control methods, I find that hours and earnings remained unchanged, but that the overtime penalty was absorbed by a reduction in the hourly wage of farmworkers. This lends support for a Coasian fixed-job model of the agricultural labor market.
+\end{abstract}
+\newpage
+\section{Introduction}
+On September 12, 2016, California governor Jerry Brown signed into law Assembly Bill (AB) 1066, making California the first state to fully remove the agricultural worker exemption from the Fair Labor Standards Act (FLSA) of 1938. Beginning in 2019, farmworkers were entitled to meal breaks, rest days, and most importantly, reduced standard hours—the statutory number of work hours before firms must pay an employee overtime pay of 1.5 times their base salary. Standard hours were set to drop from 10 hours a day or 60 hours a week by 0.5 hours a day and 5 hours per week, until farmworkers would have the 8/40 standard hours requirement found in other industries by 2022. \par
+AB 1066’s proposal was not new. Three similar bills proposing to remove the agricultural worker exemption had been brought up in 2010, 2012, and earlier in 2016, but had either failed to pass or been vetoed after passage in the California Assembly and Senate. Proponents argued that the exemption was rooted in racism of the 1930s—a deliberate attempt to disallow black farmworkers from receiving overtime. They further stressed the disproportionate difficulty of farmwork compared to most other work, and the unequitable profitability of the agricultural industry at the expense of the well-being of its workers. Opponents in the Senate Committee on Labor and Industrial Relations argued that the bill would backfire and hurt the agricultural industry and the total earnings of agricultural workers, claiming that “[t]he average annual pay for a milker on a California dairy will be reduced by 33\% while other seasonal agricultural employees could see earnings decline by as much as 28\%”, as farmers reduce hours worked and increase employment to avoid overtime payments (AB-1066 Agricultural Workers 2016). Similar sentiments were found in the Senate Rules Committee, arguing that farmworkers would see a reduction in wages and income. They further stated that this effect would be exacerbated by California minimum wage increases beginning in 2017.
+
+\subsection{Theory}
+There are two major models describing how different labor markets adapt to changes in standard hours in the short run—the fixed-wage and fixed-job model (Trejo 1991). \par
+\subsubsection{Fixed-wage model}
+The fixed-wage model assumes a perfectly competitive labor market with homogeneous workers, in which hourly wages are exogenously determined and firms optimize over workers, hours, and capital to minimize costs and meet a production quota. \par
+Let $N$ be the number of workers employed by the firm, $h$ the hours that each worker is assigned, and $K$ the capital costs faced by the firm. To avoid the difficulty of separating the cost of workers from the cost of hours, I define the firm's production function with two inputs, rather than with $N$, $h$, and $K$. Following Carcillo, Cahuc, and Zylberberg (2004), I let $e(h)$ be an individual worker's efficiency as a function of hours $h$, which is assumed to be concave and isoelastic. The firm's production function then becomes $f(Ne(h), K)$, with the simplifying assumption that the productivity of capital does not depend on duration of utilization. We can characterize the firm's cost minization problem as follows:
+\begin{align*}
+    \min_{N, h, K} \; & N(w_0h+pw_0(h-h_0)\mathbbm{1}(h > h_0) + F) + rK \\
+    \text{s.t.} \;    & f(Ne(h), K) \geq \ol{Y}
+\end{align*}
+where $w_0$ is the market hourly wage and $p$ is the overtime penalty which firms face for hiring workers for longer than standard hours, $h_0$. Hours-invariant costs per worker such as training expenses and worker benefits are represented by $F$. $K$ and $r$ are capital and its marginal cost, respectively. We can then define effective labor as $L = Ne(h)$ and the effective wage rate $w(h) = (z(h) + F)/e(h)$, where
+\[z(h) = w_0h+pw_0(h-h_0)\mathbbm{1}(h > h_0)\]
+This allows us to reformulate this problem into two steps, where $h$ is chosen to minimize $w$, and $L$ and $K$ are subsequently chosen to solve
+\begin{align*}
+    \min_{L, K} \; & wL + rK             \\
+    \text{s.t.} \; & f(L, K) \geq \ol{Y}
+\end{align*}
+After solving the comparative statics for this model, we find decreases in hours corresponding with with increases in hiring and heterogeneous results for firms depending on where their optimal choice of hours lies relative to standard hours. Firms which choose $h^* < h_0$ are unaffected by changes in $h_0$; firms with $h^* = h_0$ see reductions in $h^*$ with $h_0$; and firms with $h^* > h_0$ increase hours when $h_0$ decreases. The latter result, though initially paradoxical, stems from the marginal cost of hiring an additional worker at $h^*$ increasing while the marginal cost of additional hours remains constant.\par
+\subsubsection{Fixed-job model}
+By contrast to the fixed-wage model, under the fixed-job model, firms are faced with a labor supply curve—a function of the projected earnings and hours that workers are offered—and the ability to arbitrarily determine hourly wages (Goff 2020). Workers here are also homogeneous, and there are fixed costs associated with hiring. Faced with this constraint, firms optimize over hours, earnings, and capital to minimize costs. Taking from the fixed-wage model, we find
+\begin{align*}
+    \min_{z, h, K, N} \; & N(z + F) + rK           \\
+    \text{s.t.} \;       & f(Ne(h), K) \geq \ol{Y} \\
+                         & N \leq N(z, h)
+\end{align*}
+Here, $h^*$ and $z^*$ are agnostic to changes in overtime policy, and all effects are subsumed in hourly wages, which are a function of hours and earnings.
+\[w_0(z, h) = \frac{z(h)}{h+p(h-h_0)\mathbbm{1}(h > h_0)}\]
+When $h_0$ decreases, wages decrease for firms with $h^* > h_0$, and firms with $h^* \leq h_0$ are unaffected.
+
+\section{Literature Review}
+\subsection{Relevant Literature}
+There are relatively few studies studying the impact of overtime regulation in the United States, due to a lack of overtime policy variation, and most of these studies focus on the establishment of an overtime premium, rather than changes in standard hours. Furthermore, the findings are highly mixed, and appear to differ by industry. Trejo (1991) compares weekly hours, earnings, and wages among covered and non-covered workers under the overtime provision of the FLSA, to find that neither the fixed-wage nor the fixed-job model fully describes the dynamics of the labor market. However, in a following study he exploits time-series variations in within and between-industry coverage under the FLSA to find that the effect of an overtime premium on overtime hours worked was consistent with the fixed-job model, with no impacts on hours worked or employment (Trejo 2001). Johnson (2003) focuses on the extension of the FLSA overtime pay provision to state and local government following a Supreme Court ruling, observing a slight positive effect on overtime hours worked and a negative impact on earnings, which is inconsistent with either model. He concludes that the fixed-job model may be more accurate, with the data perhaps indicating the result of a change in the bargaining between firms and workers, rather than changes due to overtime policy. Quach (2020) and Goff (2021) use anonymized payroll data to study 2016 FLSA overtime eligibility changes, which increased the earnings threshold to be exempt from overtime pay. Quach finds inconsistency with both the fixed-wage and fixed-job model, with a loss in employment and an increase in salary to meet the earnings threshold. Goff looks at bunching around standard hours to estimate the wage elasticity of hours demand, finding that hours decrease, supporting the fixed-wage model.\par
+Studies looking at changes in standard hours are limited, as standard hours are generally established at 40 hours per week, and any further changes are in overtime eligibility. Both Hamermesh and Trejo (1997) and Bhattacharya, DeLeire, and MaCurdy (2000) study the impacts of changes in California regulation to classify overtime hours in terms of work days rather than work weeks for men, and the subsequent reversal of these changes for both men and women. Hamermesh and Trejo model the establishment of the overtime work day as creating a kink in the firm’s daily labor cost function, or increasing the overtime premium. Under this view, they confirm the predictions of the fixed-wage model, finding both daily overtime hours decreasing and greater bunching at the standard hour work day. Bhattacharya, DeLeire, and MaCurdy study the policy at the week level, viewing the reversal of this policy back to the standard hour work week as an effective increase in weekly standard hours. They observe the trajectory of industries hiring below, at, and above the kink, and also find results which align with the fixed-wage model.
+\subsection{Contribution}
+This paper attempts to study the impact of California’s unprecedented overtime legislation on agricultural workers, studying changes in hours worked, wages, and earnings. I add to the highly limited literature on labor market implications of changes in standard hours in the United States. Furthermore, I am not aware of any empirical studies which have considered the effect of overtime policy on agriculture, upon which I also hope to shed light. An early picture of how this may affect firms and workers is important, as other states, such as Washington, are beginning to consider and adopt overtime policies for farmworkers (Geranios 2021). By verifying predictions of one labor market model as opposed to the other, we can better predict how changes in standard hours will further affect agriculture in other states, as well as California's agricultural sector in the forthcoming years of overtime changes.
+
+\section{Data}
+\subsection{Description}
+Following the tradition of most studies on overtime legislation in the United States, I use the monthly IPUMS Current Population Survey (CPS) from 2007 to 2020 as a pooled time series cross-section. The CPS selects a random sample of the US population and interviews the group for four consecutive months, stops for eight months, and interviews the group once again for four months before permanently dropping the individuals from the survey. All variables come with corresponding weights, which I use in all regressions and aggregations to account for non-response and probability of selection into the CPS sample. \par
+I classify individuals by detailed industry group and occupation code into industry-occupation clusters. Clusters for which there are fewer than 30 individuals in any year are removed from consideration. The treatment group is the “Agriculture” detailed industry group with the “Miscellaneous agricultural workers” occupation, selected due to certainty of coverage under the overtime law. Control groups are chosen among other non-agriculture industry-occupation clusters, which experienced no change in overtime policy. The reason for observing industries and occupations in California rather than comparing agricultural workers across states is to eliminate bias from varying minimum wage changes between states. These changes in the minimum wage disproportionately impact the agricultural industry, as farmworkers earn among the lowest wages of any occupation recorded in the CPS. \par
+My dependent variables are hours worked, hourly wage, and weekly earnings. Data on hours worked are collected from individuals in all months, but hourly wage and weekly earnings data are only collected on the fourth and eighth months of interviews. Furthermore, the CPS weekly earnings data are computed by directly multiplying hourly wage and hours worked, which fails to account for the overtime premium. Thus, I recalculate weekly earnings, with the assumption that firms are compliant with overtime policy and pay the premium for work above standard hours.
+
+\subsection{Summary Statistics}
+\begin{center}
+    \scalebox{0.55}{
+        \input{tables/hours.tex}
+    }
+    \input{tables/summary-stats.tex}
+\end{center}
+
+\section{Empirical Strategy}
+\subsection{Difference-in-Differences}
+I use difference-in-differences (DiD) to study the impact of overtime legislation on hourly wages, characterized by the following formula:
+\[y_{igt} = \alpha_g + \delta_t + X_{igt}\gamma + \beta_1D_{1gt} + \beta_2D_{2gt} + \epsilon_{igt}\]
+Here, $\alpha_g$ and $\delta_t$ are group and year fixed effects, while $X_{igt}$ is a vector of demographic characteristics similar to those chosen in Trejo's (1991) overtime study—namely, age, sex, race, location, high school graduation status, and marital status. I run regressions both with and without these characteristics. Finally, $D_{1gt}$ and $D_{2gt}$ are dummies which take on a value of 1 for agricultural workers starting from the first and second year of treatment, respectively. The coefficients on these dummies are the DiD estimates of the 2019 and 2020 reduction in standard hours.\par
+Four choices of dependent variable $y_{igt}$ are considered, two of which are the hourly wage and the log-transformed hourly wage. The other two dependent variables exploit the different schedules of overtime and minimum wage requirements for businesses with 25 or fewer employees (U25) and businesses with greater than 25 employees (O25). By tracking the proportion of workers working at the U25 and O25 minimum wage between the treated and control groups, we should expect to see similar trends prior to the overtime policy. In 2019 and 2020, there should be a divergence present in the O25 proportion and not the U25 proportion, representing a reduction in wages due to the overtime policy. \par
+
+\bgroup
+\def\arraystretch{1.25}
+\input{tables/min-wage-table.tex}
+\egroup
+
+For all of the DiD regressions, I choose control groups based on similarity of pre-treatment trends in average hourly wages and proportion working at either minimum wage. Because multiple minimum wage increases occurred within the pre-treatment window, this ensures that these changes did not have heterogeneous effects on the treated and control groups in 2019 and 2020, meaning differences are solely due to overtime policy. The chosen control groups were retail and restaurant cashiers, waiters/waitresses, and restaurant food preparation workers. Figure 1 displays the trends in wages and proportions at the O25 and U25 minimum wages, giving a visual verification of the parallel trends assumption.
+
+\begin{landscape}
+    \begin{figure}
+        \caption{Difference-in-Differences Parallel Trends Plots}
+        \label{}
+        \vspace*{\fill}
+        \centering
+        \scalebox{0.5}{
+            \input{tables/did-plots.tex}
+        }
+        \vspace*{\fill}
+    \end{figure}
+\end{landscape}
+
+\subsection{Synthetic Control}
+For analyses on hours worked and weekly earnings, there was no obvious control group. Each individual industry-occupation clusters differed significantly from agriculture in hours worked in the pre-treatment period, creating an unreliable DiD estimator. Due to the large number of industry-occupation clusters in the data, I chose to use the synthetic control method (SCM) to construct a counterfactual to agriculture which can account for confounders changing over time. \par
+I use a long window of 2007 to 2020, as matching pre-treatment outcomes for a large number of pre-treatment periods, can sufficiently reduce the bias of the SCM estimator without matching on observed covariates (Botosaru and Ferman 2019).
+To verify our SCM results, we apply the method to all other industries in the donor pool and removing those with high pre-treatment mean squared predictive errors (MSPE) for the generated synthetic controls. By looking at the MSPE ratio between the post and pre-treatment periods for the treated state and its placebos, we can then assess the significance of the post-treatment gap (Abadie, Diamond, and Hainmueller 2010). \par
+For an intervention after $t_0$, we can find the MSPE ratio for treated group $Y_{gt}$ and synthetic control $\hat{Y}_{gt}$ as follows:
+\[\text{MSPE ratio} = \frac{\sum_{t > t_0} (Y_{gt} - \hat{Y}_{gt})^2}{\sum_{t \leq t_0} (Y_{gt} - \hat{Y}_{gt})^2}\]
+
+\begin{landscape}
+    \input{tables/did.tex}
+\end{landscape}
+
+\begin{landscape}
+    \begin{figure}[!]
+        \caption{Synthetic Control Results for Hours and Earnings}
+        \label{}
+        \vspace*{\fill}
+        \centering
+        \begin{subfigure}{0.55\linewidth}
+            \begin{adjustbox}{width=\linewidth}
+                \input{tables/sc-hours-path.tex}
+            \end{adjustbox}
+        \end{subfigure}
+        \begin{subfigure}{0.4\linewidth}
+            \begin{adjustbox}{width=\linewidth}
+                \input{tables/sc-hours-placebo.tex}
+            \end{adjustbox}
+        \end{subfigure}
+        \begin{subfigure}{0.55\linewidth}
+            \begin{adjustbox}{width=\linewidth}
+                \input{tables/sc-earnings-path.tex}
+            \end{adjustbox}
+        \end{subfigure}
+        \begin{subfigure}{0.4\linewidth}
+            \begin{adjustbox}{width=\linewidth}
+                \input{tables/sc-earnings-placebo.tex}
+            \end{adjustbox}
+        \end{subfigure}
+        \vspace*{\fill}
+    \end{figure}
+\end{landscape}
+
+\section{Results}
+The difference-in-differences estimates for changes in hourly wages in Table 2 are consistent with the predictions of the fixed-job model in 2019. When controlling for demographic characteristics, we see that there is an increase in the proportion of workers working at the O25 minimum wage by 9.5\%, significant at the 10\% level. Because the DiD estimator for hourly wage has a negative coefficient, and there was no change in the proportion at the U25 minimum wage, it is likely that this effect is due to an overall decrease in wages. However, due to the sensitivity of the point estimates to the addition of controls, it is difficult to state a clear effect size of decreasing standard hours on hourly wages.
+
+Table 2 also shows that in 2020, there is a decline in the proportion of O25 and U25 minimum wage workers. The decline in the U25 estimate is 16\%, and significant at the 5\% level. This difference is likely due to the COVID-19 pandemic, which had particularly serious impacts on retail and restaurant workers, relative to other industries. Rather than farms increasing wages, it appears more plausible that the retail and service industries decreased wages this year. As a result, the estimates for 2020 are biased, and fail to isolate the effect of overtime policy on the labor market.
+
+The SCM results shown in Figure 2 are also in line with the fixed-job model, which predicts no changes in hours or earnings. There seems to be no meaningful divergence from the synthetic controls evident from any of the plots. Furthermore, the MSPE ratio for agriculture is among the lowest among the industry-occupation clusters in the donor pool despite having a very strong pre-treatment fit for hours worked. However, the pre-treatment MSPE for weekly earnings is relatively large. Weekly earnings data is collected less frequently and suffers from high variability, lowering the quality of the SCM fit. This may make it more likely to find a spurious null result for this variable.
+
+
+\section{Robustness Checks}
+I perform a backdated placebo analysis for my DiD design, shifting the period of analysis two years back, from 2014 to 2018. I redefine $D_1$ and $D_2$ to take values of 1 after 2017 and 2018, before any overtime policy changes occurred. This confirms the parallel trends assumption and eliminates the possibility of anticipatory effects, which may be a cause for concern due to the near three year delay of implementation after the bill's passage. The results of these tests are shown in Table 3. \par
+As expected, I find statistically insignificant results for all dependent variables, with the exception of the proportion of U25 minimum wage workers, which decreased in 2017. Though the significance of this DiD estimator does not affect our conclusions, it perhaps calls into question whether the minimum wage changes starting in 2017 are a source of bias. However, the significant decrease in this proportion makes sense in context, without indicating bias. The first minimum wage change occurred in 2017 but only affected businesses with over 25 employees. Because farms are generally larger than restaurants in size, farms experienced a greater shift away from the 2016 common minimum wage. Consistent with this explanation, we find that the placebo treatment effect of 2018 is insignificant, as minimum wage changes occur for businesses of all sizes during this year. 2019 and 2020 are also years in which minimum wage changes occur for businesses of all sizes, and should be similar.
+
+\begin{landscape}
+    \input{tables/did-placebo.tex}
+\end{landscape}
+
+\section{Conclusion}
+In this paper, I study whether reductions in standard hours result in reductions in hours, earnings, and wages, addressing the concerns that many had toward the implementation of California's AB 1066. The results from my empirical methods suggest that hours and earnings remained unchanged, and that the overtime penalty was fully absorbed by a reduction in the hourly wage of farmworkers. Based on this preliminary analysis, it seems that many of the concerns about the overtime policy are unsupported. However, my analysis is limited to the change of standard hours from 60 to 55, which may not reflect how the market will react to larger reductions in standard hours in the future, where more workers are affected.
+
+Furthermore, because the CPS interviews few farmworkers each month, I was limited in the analysis I could do. Future work would test more of the hypotheses of the fixed-wage and fixed-job models, checking whether workers at different hours relative to the overtime kink have different outcomes after a change in standard hours. With more data, we could study heterogeneity in the impact of overtime policy on various types of farmworkers, to determine whether certain groups face more undesirable outcomes.
+
+
+\begin{thebibliography}{7}
+    \bibitem{}
+    Abadie, Alberto \& Diamond, Alexis \& Hainmueller, Jens. (2007). Synthetic Control Methods for Comparative Case Studies: Estimating the Effect of California's Tobacco Control Program. Journal of the American Statistical Association. 105. 493-505. 10.1198/jasa.2009.ap08746.
+    \bibitem{}
+    "AB-1066 Agricultural Workers: Wages, Hours, and Working Conditions." California Legislative Information. Accessed December 17, 2021. https://leginfo.legislature.ca.gov/faces/billAnalysisClient.xhtml?bill\_id=201520160AB1066.
+    \bibitem{}
+    Bhattacharya, Jay \& Deleire, Thomas \& MaCurdy, Thomas. (2000). The California Overtime Experiment: Labor Demand and the Impact of Overtime Regulation on Hours of Work.
+    \bibitem{}
+    Botosaru, Irene \& Ferman, Bruno. (2019). On the Role of Covariates in the Synthetic Control Method. The Econometrics Journal. 22. 10.1093/ectj/utz001.
+    \bibitem{}
+    Carcillo, Stephane \& Cahuc, Pierre \& Zylberberg, André. (2014). Labor Economics.
+    \bibitem{}
+    Geranios, Nicholas K. "Washington Governor Signs Agriculture Worker Overtime Bill." AP NEWS. May 11, 2021. Accessed December 17, 2021. https://apnews.com/article/washington-agriculture-health-coronavirus-pandemic-bills-c6fe6679f54995edc661740171256428.
+    \bibitem{}
+    Goff, L. (2021). Treatment Effects in Bunching Designs: The Impact of the Federal Overtime Rule on Hours.
+    \bibitem{}
+    Hamermesh, Daniel \& Trejo, Stephen. (2000). The Demand for Hours of Labor: Direct Evidence from California. The Review of Economics and Statistics. 82. 38-47. 10.2139/ssrn.120668.
+    \bibitem{}
+    Johnson IV, J. H. (2003). The Impact of Federal Overtime Legislation on Public Sector Labor Markets. Journal of Labor Economics, 21(1), 43–69. https://doi.org/10.1086/344123
+    \bibitem{}
+    Trejo, S. J. (1991). The Effects of Overtime Pay Regulation on Worker Compensation. The American Economic Review, 81(4), 719–740. http://www.jstor.org/stable/2006639
+    \bibitem{}
+    Trejo, S. J. (2003). Does the Statutory Overtime Premium Discourage Long Workweeks? Industrial and Labor Relations Review, 56(3), 530–551. https://doi.org/10.2307/3590923
+    \bibitem{}
+    Quach, S. (2020). The Labor Market Effects of Expanding Overtime Coverage. PSN: Labor (Topic).
+\end{thebibliography}
+
+% Washington citation:
+% https://apnews.com/article/washington-agriculture-health-coronavirus-pandemic-bills-c6fe6679f54995edc661740171256428
+% https://app.leg.wa.gov/billsummary?BillNumber=5172&Year=2021&Initiative=false
+
+
+\end{document}

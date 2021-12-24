@@ -1,0 +1,140 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(lmtest)
+library(seas)
+library(Synth)
+library(SCtools)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv("california.csv")
+farmer_data = read.csv("farmers.csv")
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNWEEK') {
+    df = filter(df, EARNWEEK != 9999.99)
+    df$DEPVAR = log(df$EARNWEEK)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+season_to_date = function(df) {
+  df$DATE = ""
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=2, "MAM"=5, "JJA"=8, "SON"=11)
+      df$DATE[(df$YEAR == y) & (df$SEAS == s)] = 
+        sprintf("%d-%02d-01", y, m)
+    }
+  }
+  df$DATE = as.Date(df$DATE, format="%Y-%m-%d")
+  return(df)
+}
+
+remove_units = function(df) {
+  df = filter(df, !is.na(DEPVAR))
+  unit_set = unique(df$UNIT)
+  for (d in unique(df$date)) {
+    unit_set = intersect(unit_set, filter(df, date == d)$UNIT)
+  }
+  df = filter(df, UNIT %in% unit_set)
+  return(df)
+}
+
+synth_control = function(dep_var,
+                         start_year,
+                         treat_year) {
+  data = ca_data
+  df = filter(data, (IND > 0) &
+                (YEAR >= start_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  df = filter(df, !(IND == 1) | (OCC == 6050))
+  df$UNIT = df$IND
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  df$date = make_date(df$YEAR, 1, 1)
+  
+  # Keep only units which have data for all years
+  df = remove_units(df)
+  
+  # Aggregate by year, season, and unit
+  df$POP = df$WEIGHT
+  df$DEPVAR = df$DEPVAR * df$WEIGHT
+  df = setDT(df)[,lapply(.SD, sum, na.rm=T), by=.(date, UNIT)]
+  df$DEPVAR = df$DEPVAR / df$WEIGHT
+  
+  # Set control variables
+  treated_code = 1
+  control_codes = setdiff(unique(df$UNIT), treated_code)
+  
+  # Convert everything to time, because synth requires numeric
+  df$TIME = as.numeric(df$date) 
+  
+  # Unit names are required
+  df$UNITNAME = as.character(df$UNIT)
+  
+  # Pre-treatment period
+  opt_window = setdiff(unique(df$TIME), as.numeric(make_date(treat_year, 1, 1)):max(df$TIME))
+  
+  # Set predictors as all except last pre-treatment outcome variable, which is done manually
+  sp_predictors = list()
+  for (i in 1:(length(opt_window)-1)) {
+    sp_predictors[[i]] = list('DEPVAR', opt_window[i], 'mean')
+  }
+  dataprep.out <- dataprep(foo = df,
+                           dependent = 'DEPVAR',
+                           predictors = 'DEPVAR',
+                           predictors.op = 'mean',
+                           time.predictors.prior = as.numeric(make_date(treat_year-1, 1, 1)), 
+                           special.predictors = sp_predictors,
+                           unit.variable = 'UNIT',
+                           unit.names.variable = 'UNITNAME',
+                           time.variable = 'TIME',
+                           treatment.identifier = treated_code,
+                           controls.identifier = control_codes,
+                           time.optimize.ssr = sort(opt_window),
+                           time.plot = sort(unique(df$date)))
+  return(dataprep.out)
+}
+
+dataprep.out = synth_control(dep_var = 'AHRSWORK1',
+                             start_year = 2007, 
+                             treat_year = 2019)
+synth.out <- synth(dataprep.out, Sigf.ipop=5, strategy='multiprocess')
+
+# Plot paths of treated and synthetic
+path.plot(synth.res = synth.out,
+          dataprep.res = dataprep.out)
+# Plot differences between treated and synthetic
+gaps.plot(synth.res = synth.out,
+          dataprep.res = dataprep.out)
+
+# Print weights
+round(synth.out$solution.w,2)
+
+# Create placebos and test
+tdf <- generate.placebos(dataprep.out, synth.out, Sigf.ipop = 5, strategy='multiprocess')
+ratio <- mspe.test(tdf)
+ratio$p.val
+plot_placebos(tdf, discard.extreme = TRUE, mspe.limit=5)
+mspe.plot(tdf, discard.extreme = TRUE)

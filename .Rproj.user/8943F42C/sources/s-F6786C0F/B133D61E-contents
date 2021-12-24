@@ -1,0 +1,137 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(sandwich)
+library(lmtest)
+library(seas)
+library(Synth)
+library(SCtools)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv("california.csv")
+farmer_data = read.csv("farmers.csv")
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+season_to_date = function(df) {
+  df$date = ""
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=2, "MAM"=5, "JJA"=8, "SON"=11)
+      df$date[(df$YEAR == y) & (df$SEAS == s)] = 
+        sprintf("%d-%02d-01", y, m)
+    }
+  }
+  df$date = as.Date(df$date, format="%Y-%m-%d")
+  return(df)
+}
+
+remove_units = function(df, unit) {
+  df = filter(df, !is.na(AHRSWORK1))
+  unit_set = unique(df[[unit]])
+  for (d in unique(df$date)) {
+    unit_set = intersect(unit_set, filter(df, date == d)[[unit]])
+  }
+  df = df[df[[unit]] %in% unit_set,]
+  return(df)
+}
+
+graph_did = function(hours_thresh,
+                     start_year) {
+  treat_date = as.Date("2018-11-01", format="%Y-%m-%d")
+  df = filter(ca_data, (IND > 0) &
+                (YEAR >= start_year) &
+                (ASECFLAG %in% c(NA, 2)) &
+                (AHRSWORK1 != 999))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  
+  # Code in seasons and adjust December to be counted in next year's winter
+  df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                    format="%Y-%m-%d")
+  df$SEASON <- mkseas(x = df, width = "DJF")
+  df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+  
+  # Filter out winter of 2019, due to overlap
+  df = filter(df, (YEAR != 2019) | (SEASON != "DJF"))
+  
+  # Keep only units which have data for all years
+  df = remove_units(df, ind)
+  
+  df$IND[df$IND > 1] = 0
+  
+  # Aggregate by year, season, and unit
+  df$PROP = ifelse(df$AHRSWORK1 > hours_thresh, 1, 0)
+  df = setDT(df)[,lapply(.SD, weighted.mean, WTFINL, na.rm=T), by=.(YEAR, SEASON, IND)]
+  
+  # Convert season info to date
+  df = season_to_date(df)
+  
+  ggplot(df, aes(y=PROP, x=date, color=factor(IND))) +
+    geom_line() +
+    geom_vline(xintercept=treat_date, linetype=5) +
+    scale_x_date(date_breaks = "years" , date_labels = "%Y")
+}
+
+graph_did(hours_thresh=50,
+          start_year=2014)
+
+

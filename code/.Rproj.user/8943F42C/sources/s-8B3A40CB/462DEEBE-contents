@@ -1,0 +1,205 @@
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+set_min_wage = function(df, level) {
+  df$MINWAGE = 999.99
+  df$MINWAGE[df$YEAR == 2007] = 7.5
+  df$MINWAGE[df$YEAR %in% 2008:2013] = 8
+  df$MINWAGE[(df$YEAR == 2014) & (df$MONTH < 7)] = 8
+  df$MINWAGE[(df$YEAR == 2014) & (df$MONTH >= 7)] = 9
+  df$MINWAGE[df$YEAR == 2015] = 9
+  df$MINWAGE[df$YEAR == 2016] = 10
+  if (level == 1) {
+    df$MINWAGE[df$YEAR == 2017] = 10
+    df$MINWAGE[df$YEAR == 2018] = 10.5
+    df$MINWAGE[df$YEAR == 2019] = 11
+    df$MINWAGE[df$YEAR == 2020] = 12
+    df$MINWAGE[df$YEAR == 2021] = 13
+  } else {
+    df$MINWAGE[df$YEAR == 2017] = 10.5
+    df$MINWAGE[df$YEAR == 2018] = 11
+    df$MINWAGE[df$YEAR == 2019] = 12
+    df$MINWAGE[df$YEAR == 2020] = 13
+    df$MINWAGE[df$YEAR == 2021] = 14
+  }
+  return(df)
+}
+
+set_earnings = function(df) {
+  df$STANDARDHOURS = 40
+  df$STANDARDHOURS[(df$YEAR <= 2018) & (df$ID == '1-6050')] = 60
+  df$STANDARDHOURS[(df$YEAR == 2019) & (df$ID == '1-6050')] = 55
+  df$STANDARDHOURS[(df$YEAR == 2020) & (df$ID == '1-6050')] = 50
+  df$STANDARDHOURS[(df$YEAR == 2021) & (df$ID == '1-6050')] = 45
+  df$STANDARDHOURS[(df$YEAR == 2021) & (df$OCC == 9130)] = 999
+  
+  df$EARNINGS = 0
+  df$EARNINGS = df$HOURWAGE * df$UHRSWORK1
+  df[df$UHRSWORK1 > df$STANDARDHOURS,]$EARNINGS = df[df$UHRSWORK1 > df$STANDARDHOURS,]$EARNINGS +
+    0.5 * df[df$UHRSWORK1 > df$STANDARDHOURS,]$HOURWAGE *
+    (df[df$UHRSWORK1 > df$STANDARDHOURS,]$UHRSWORK1 - df[df$UHRSWORK1 > df$STANDARDHOURS,]$STANDARDHOURS)
+  return(df)
+}
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'HOURS') {
+    df = filter(df, UHRSWORK1 != 999, UHRSWORK1 > 0)
+    df$DEPVAR = df$UHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'EARNINGS') {
+    df = filter(df, HOURWAGE != 999.99,
+                UHRSWORK1 != 999,
+                UHRSWORK1 > 0)
+    df = set_earnings(df)
+    df$DEPVAR = df$EARNINGS
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNINGS') {
+    df = filter(df, HOURWAGE != 999.99,
+                UHRSWORK1 != 999,
+                UHRSWORK1 > 0)
+    df = set_earnings(df)
+    df$DEPVAR = log(df$EARNINGS)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = df$HOURWAGE
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'OTPAY') {
+    df = filter(df, OTPAY != 99)
+    df$DEPVAR = ifelse(df$OTPAY == 2, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'MULTJOB') {
+    df = filter(df, MULTJOB != 0)
+    df$DEPVAR = ifelse(df$MULTJOB == 2, 1, 0)
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'MINWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df = set_min_wage(df, 2)
+    df$DEPVAR = ifelse(df$DEPVAR | (df$HOURWAGE == df$MINWAGE), 1, 0)
+    df$WEIGHT = df$EARNWT
+  }else if (dep_var == 'MINWAGE1') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'MINWAGE2') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 2)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } 
+  else if (dep_var == 'MINWAGE2') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 2)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  else if (dep_var == 'BELOW_MINWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df$DEPVAR = ifelse(df$HOURWAGE < df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+get_synth_data = function(data, start_year, end_year, dep_var) {
+  df = filter(data, (IND > 0) &
+                (OCC > 0) &
+                (YEAR >= start_year) &
+                (YEAR <= end_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  df = df %>% 
+    mutate(ID = group_indices_(df, .dots=c("IND", "OCC"))) 
+  df$ID_STR = sprintf("%d-%d", df$IND, df$OCC)
+  df = process_dep_var(df, dep_var)
+  return(df)
+}
+
+get_did_data = function(data, start_year, end_year, dep_var, clusters) {
+  df = filter(data, (IND > 0) &
+                (OCC > 0) &
+                (YEAR >= start_year) &
+                (YEAR <= end_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  df$ID = sprintf("%d-%d", df$IND, df$OCC)
+  df = filter(df, ID %in% clusters)
+  df = process_dep_var(df, dep_var)
+  return(df)
+}
+
+remove_id = function(df) {
+  id_set = unique(df$ID_STR)
+  for (y in unique(df$YEAR)) {
+    id_set = intersect(id_set, filter(df, YEAR == y)$ID_STR)
+  }
+  df = filter(df, ID_STR %in% id_set)
+  return(df)
+}
+

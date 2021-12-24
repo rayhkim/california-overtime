@@ -1,0 +1,398 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(ipumsr)
+library(scales)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+data = read.csv("cps_00005.csv")
+
+CA = 6
+OR = 41
+NV = 32
+AZ = 4
+WA = 53
+# https://www2.census.gov/programs-surveys/cps/methodology/Industry%20Codes.pdf
+forestry_ind_codes = c(190, 270, 280)
+farming_ind_codes = c(170, 180, 290)
+
+get_data <- function(years, months, state_codes, ind_codes) {
+   return(filter(data, (IND %in% ind_codes) &
+                    (STATEFIP %in% state_codes) & 
+                    (YEAR %in% years) &
+                    (ASECFLAG %in% c(NA, 2)) &
+                    (MONTH %in% months)))
+}
+graph_hours_percentile = function(years, percentile) {
+   months = 1:12
+   state.code = list(CA, c(OR, AZ, NV, WA))
+   state.name = c('CA', 'Agg')
+   hours.df_list = list()
+   for (i in 1:length(state.code)) {
+      hours.vector = numeric(length(years) * length(months))
+      date.vector = character(length(years) * length(months))
+      for (j in 1:length(years)) {
+         for (k in 1:length(months)) {
+            if ((years[j] == 2021) & (months[k] > 9)) {
+               break
+            }
+            temp = filter(get_data(years[j], months[k], state.code[[i]], farming_ind_codes), AHRSWORK1 != 999)
+            hours.vector[j*k] = quantile(temp$AHRSWORK1, percentile, na.rm=TRUE)
+            date.vector[j*k] = sprintf("%d-%02d-01", years[j], months[k])
+         }
+      }
+      hours.df_state = data.frame(date = as.Date(date.vector, format="%Y-%m-%d"), hours_worked = hours.vector, state = state.name[i])
+      hours.df_list[[i]] = hours.df_state
+   }
+   hours.df = rbindlist(hours.df_list)
+   ggplot(hours.df, aes(x=date, y=hours_worked, color=state)) + 
+      geom_line() +
+      scale_x_date(date_breaks="6 months", date_labels="%b %Y") +
+      geom_vline(xintercept=as.Date("2019-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2020-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2021-01-01", format="%Y-%m-%d"), linetype="dashed")
+}
+graph_mean_hourly_wage = function(years) {
+   months = list(1:3, 4:6, 7:9, 10:12)
+   state.code = list(CA, c(OR, AZ, NV, WA))
+   state.name = c('CA', 'Agg')
+   earnings.df_list = list()
+   for (i in 1:length(state.code)) {
+      earnings.vector = numeric(length(years) * length(months))
+      date.vector = character(length(years) * length(months))
+      for (j in 1:length(years)) {
+         for (k in 1:length(months)) {
+            if ((years[j] == 2021) & (k == 4)) {
+               break
+            }
+            temp = filter(get_data(years[j], months[[k]], state.code[[i]], farming_ind_codes), HOURWAGE != 999.99)
+            earnings.vector[j*k] = mean(temp$HOURWAGE, na.rm=TRUE)
+            date.vector[j*k] = sprintf("%d-%02d-01", years[j], months[[k]][1])
+         }
+      }
+      earnings.df_state = data.frame(date = as.Date(date.vector, format="%Y-%m-%d"), earnings = earnings.vector, state = state.name[i])
+      earnings.df_list[[i]] = earnings.df_state
+   }
+   earnings.df = rbindlist(earnings.df_list)
+   ggplot(earnings.df, aes(x=date, y=earnings, color=state)) + 
+      geom_line() +
+      scale_x_date(date_breaks="6 months", date_labels="%b %Y") +
+      geom_vline(xintercept=as.Date("2019-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2020-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2021-01-01", format="%Y-%m-%d"), linetype="dashed")
+}
+graph_hourly_wage_percentile = function(years, percentile) {
+   months = list(1:3, 4:6, 7:9, 10:12)
+   state.code = list(CA, c(OR, AZ, NV, WA))
+   state.name = c('CA', 'Agg')
+   earnings.df_list = list()
+   for (i in 1:length(state.code)) {
+      earnings.vector = numeric(length(years) * length(months))
+      date.vector = character(length(years) * length(months))
+      for (j in 1:length(years)) {
+         for (k in 1:length(months)) {
+            if ((years[j] == 2021) & (k == 4)) {
+               break
+            }
+            temp = filter(get_data(years[j], months[[k]], state.code[[i]], farming_ind_codes), HOURWAGE != 999.99)
+            earnings.vector[j*k] = quantile(temp$HOURWAGE, percentile, na.rm=TRUE)
+            date.vector[j*k] = sprintf("%d-%02d-01", years[j], months[[k]][1])
+         }
+      }
+      earnings.df_state = data.frame(date = as.Date(date.vector, format="%Y-%m-%d"), earnings = earnings.vector, state = state.name[i])
+      earnings.df_list[[i]] = earnings.df_state
+   }
+   earnings.df = rbindlist(earnings.df_list)
+   ggplot(earnings.df, aes(x=date, y=earnings, color=state)) + 
+      geom_line() +
+      scale_x_date(date_breaks="6 months", date_labels="%b %Y") +
+      geom_vline(xintercept=as.Date("2019-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2020-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2021-01-01", format="%Y-%m-%d"), linetype="dashed")
+}
+graph_prop_over_standard = function(years, standard_hours) {
+   months = 1:12
+   state.code = list(CA, c(OR, AZ, NV, WA))
+   state.name = c('CA', 'Agg')
+   hours.df_list = list()
+   for (i in 1:length(state.code)) {
+      hours.vector = numeric(length(years) * length(months))
+      date.vector = character(length(years) * length(months))
+      for (j in 1:length(years)) {
+         for (k in 1:length(months)) {
+            if ((years[j] == 2021) & (months[k] > 9)) {
+               break
+            }
+            temp = filter(get_data(years[j], months[k], state.code[[i]], farming_ind_codes), AHRSWORK1 != 999)
+            hours.vector[j*k] = sum(temp$AHRSWORK1 >= standard_hours, na.rm=TRUE)/length(na.omit(temp$AHRSWORK1))
+            date.vector[j*k] = sprintf("%d-%02d-01", years[j], months[k])
+         }
+      }
+      hours.df_state = data.frame(date = as.Date(date.vector, format="%Y-%m-%d"), hours_worked = hours.vector, state = state.name[i])
+      hours.df_list[[i]] = hours.df_state
+   }
+   hours.df = rbindlist(hours.df_list)
+   ggplot(hours.df, aes(x=date, y=hours_worked, color=state)) + 
+      geom_line() +
+      scale_x_date(date_breaks="6 months", date_labels="%b %Y") +
+      geom_vline(xintercept=as.Date("2019-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2020-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+      geom_vline(xintercept=as.Date("2021-01-01", format="%Y-%m-%d"), linetype="dashed")
+}
+
+# Graph how many people work more than 40 hours
+# See how many people work over the new standard hours before and after intervention
+# Indicators for month (month fixed effect) to control for season
+# Look into movement between states
+
+
+# Graph cross-sectional hours worked percentile between states
+graph_hours_percentile(2014:2021, 0.75)
+
+# Graph cross-sectional proportion of workers working over new standard hours
+graph_prop_over_standard(2018:2019, 55)
+graph_prop_over_standard(2019:2020, 50)
+graph_prop_over_standard(2020:2021, 45)
+
+# Graph cross-sectional mean hourly wage
+graph_mean_hourly_wage(2013:2021)
+graph_hourly_wage_percentile(2013:2021, 0.25)
+graph_hourly_wage_percentile(2013:2021, 0.5)
+graph_hourly_wage_percentile(2013:2021, 0.75)
+
+# Graph cross-sectional hours worked in a state between years
+years = c(2018, 2021)
+state = CA
+hours_list = list()
+for (i in 1:length(years)) {
+   temp = filter(get_data(years[i], 1:12, state, farming_ind_codes), AHRSWORK1 != 999)
+   temp1 = split(temp, list(temp$SERIAL, temp$PERNUM), drop=TRUE)
+   temp2 = sapply(temp1, function(x) mean(x$AHRSWORK1))
+   names(temp2) = NULL
+   hours = data.frame(hours_worked = temp2)
+   hours$year = sprintf("%d", years[i])
+   hours_list[[i]] = hours
+}
+hours_df = rbindlist(hours_list)
+ggplot(hours_df, aes(hours_worked, fill = year)) + 
+   geom_histogram(alpha = 0.5, aes(y=..density.., color = year), position = 'identity', binwidth = 2)
+
+# Graph cross-sectional hours worked in a year between states
+state.code = c(CA, OR, AZ)
+state.name = c('CA', 'OR', 'AZ')
+year = 2020
+hours_list = list()
+for (i in 1:length(state.code)) {
+   temp = filter(get_data(year, 1:12, state.code[i], farming_ind_codes), AHRSWORK1 != 999)$AHRSWORK1
+   hours = data.frame(hours_worked = temp)
+   hours$state = state.name[i]
+   hours_list[[i]] = hours
+}
+hours_df = rbindlist(hours_list)
+ggplot(hours_df, aes(hours_worked, fill = state)) + 
+   geom_histogram(alpha = 0.5, aes(y=..density.., color = state), position = 'identity', binwidth = 2)
+
+
+
+
+# Graph cross-sectional weekly salary
+# This might be bad because it combines both hours worked and hourly wage
+years = 2013:2021
+earnings.df_list = list()
+state.code = list(CA, c(OR, AZ, WA, NV))
+state.name = c('CA', 'Agg')
+for (i in 1:length(state.code)) {
+   earnings.vector = numeric(length(years))
+   date.vector = character(length(years))
+   for (j in 1:length(years)) {
+      temp = filter(get_data(years[j], 1:12, state.code[[i]], farming_ind_codes), (EARNWEEK != 9999.99) & (PAIDHOUR == 2))
+      earnings.vector[j] = mean(temp$EARNWEEK)
+      date.vector[j] = sprintf("%d-01-01", years[j])
+   }
+   earnings.df_state = data.frame(date = as.Date(date.vector, format="%Y-%m-%d"), earnings = earnings.vector, state = state.name[i])
+   earnings.df_list[[i]] = earnings.df_state
+}
+earnings.df = rbindlist(earnings.df_list)
+ggplot(earnings.df, aes(x=date, y=earnings, color=state)) + 
+   geom_line() +
+   scale_x_date(date_breaks="6 months", date_labels="%b %Y") +
+   geom_vline(xintercept=as.Date("2019-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+   geom_vline(xintercept=as.Date("2020-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+   geom_vline(xintercept=as.Date("2021-01-01", format="%Y-%m-%d"), linetype="dashed")
+
+
+
+
+
+# Print change in hourly wage for farmers in panel across years, merging all data for a farmer in a year
+years = 2019
+state.code = CA
+for (i in 1:length(years)) {
+   year1_data = filter(data, (STATEFIP %in% state.code) & 
+                          (YEAR < years[i]) &
+                          (MISH <= 4) &
+                          (HOURWAGE != 999.99) & 
+                          (ASECFLAG %in% c(NA, 2)) &
+                          (PAIDHOUR == 2))
+   year2_data = filter(data, (STATEFIP %in% state.code) & 
+                          (YEAR == years[i]) &
+                          (MISH >= 5) &
+                          (HOURWAGE != 999.99) &
+                          (ASECFLAG %in% c(NA, 2)) &
+                          (PAIDHOUR == 2))
+   
+   year1_farmers = filter(year1_data, IND %in% farming_ind_codes)
+   year2_farmers = filter(year2_data, IND %in% farming_ind_codes)
+   year1_nonfarmers = filter(year1_data, !(IND %in% farming_ind_codes))
+   year2_nonfarmers = filter(year2_data, !(IND %in% farming_ind_codes))
+   
+   farmers_merged = merge(year1_farmers, year2_farmers, by='CPSIDP')
+   nonfarmers_merged = merge(year1_nonfarmers, year2_nonfarmers, by='CPSIDP')
+
+   print(sprintf("%d to %d", years[i]-1, years[i]))
+   print(sprintf("Farmers: n=%d", nrow(farmers_merged)))
+   print(mean(farmers_merged$HOURWAGE.x))
+   print(mean(farmers_merged$HOURWAGE.y))
+   print(sprintf("Non-farmers: n=%d", nrow(nonfarmers_merged)))
+   print(mean(nonfarmers_merged$HOURWAGE.x))
+   print(mean(nonfarmers_merged$HOURWAGE.y))
+}
+
+# Print change in hours worked for farmers in panel across years
+# Should also control for things like seasons here, cause panels were taken in different parts of the month
+years = 2014:2021
+state.code = CA
+for (i in 1:length(years)) {
+   year1_data = filter(data, (STATEFIP %in% state.code) & 
+                          (YEAR < years[i]) &
+                          (MISH <= 4) &
+                          (AHRSWORK1 != 999) & 
+                          (ASECFLAG %in% c(NA, 2)) &
+                          (PAIDHOUR == 2))
+   year2_data = filter(data, (STATEFIP %in% state.code) & 
+                          (YEAR == years[i]) &
+                          (MISH >= 5) &
+                          (AHRSWORK1 != 999) &
+                          (ASECFLAG %in% c(NA, 2)) &
+                          (PAIDHOUR == 2))
+   
+   year1_farmers = filter(year1_data, IND %in% farming_ind_codes)
+   year2_farmers = filter(year2_data, IND %in% farming_ind_codes)
+   year1_nonfarmers = filter(year1_data, !(IND %in% farming_ind_codes))
+   year2_nonfarmers = filter(year2_data, !(IND %in% farming_ind_codes))
+   
+   farmers_merged = merge(year1_farmers, year2_farmers, by='CPSIDP')
+   nonfarmers_merged = merge(year1_nonfarmers, year2_nonfarmers, by='CPSIDP')
+   
+   print(sprintf("%d to %d", years[i]-1, years[i]))
+   print(sprintf("Farmers: n=%d", nrow(farmers_merged)))
+   print(unname(quantile(farmers_merged$AHRSWORK1.x, 0.75)))
+   print(unname(quantile(farmers_merged$AHRSWORK1.y, 0.75)))
+   print(sprintf("Non-farmers: n=%d", nrow(nonfarmers_merged)))
+   print(unname(quantile(nonfarmers_merged$AHRSWORK1.x, 0.75)))
+   print(unname(quantile(nonfarmers_merged$AHRSWORK1.y, 0.75)))
+}
+
+
+
+
+
+
+
+
+
+# Print change in jobs of hourly workers
+years = 2014:2020
+state.code = CA
+for (i in 1:length(years)) {
+   year1_data = filter(data, (STATEFIP %in% state.code) & 
+                          (YEAR == years[i]-1) &
+                          (ASECFLAG %in% c(NA, 2)) &
+                          (MISH <= 4) &
+                          (PAIDHOUR == 2))
+   year2_data = filter(data, (STATEFIP %in% state.code) & 
+                          (YEAR == years[i]) &
+                          (ASECFLAG %in% c(NA, 2)) &
+                          (MISH >= 5) &
+                          (PAIDHOUR == 2))
+   
+   year1_farmers = filter(year1_data, IND %in% farming_ind_codes)
+   year2_farmers = filter(year2_data, IND %in% farming_ind_codes)
+   year1_nonfarmers = filter(year1_data, !(IND %in% farming_ind_codes))
+   year2_nonfarmers = filter(year2_data, !(IND %in% farming_ind_codes))
+   
+   print(sprintf("%d to %d", years[i]-1, years[i]))
+   print(sprintf("Farm to farm, n=%d", length(intersect(year1_farmers$CPSIDP, year2_farmers$CPSIDP))))
+   print(sprintf("Farm to non-farm, n=%d", length(intersect(year1_farmers$CPSIDP, year2_nonfarmers$CPSIDP))))
+   print(sprintf("Non-farm to farm, n=%d", length(intersect(year1_nonfarmers$CPSIDP, year2_farmers$CPSIDP))))
+   print(sprintf("Non-farm to non-farm, n=%d", length(intersect(year1_nonfarmers$CPSIDP, year2_nonfarmers$CPSIDP))))
+}
+
+
+
+
+
+
+
+
+# Seeing which industries farmers moved to
+# print(sort(table(filter(farm_to_nonfarm, (OCC.y != 0) & (IND.y != 0))$IND.y),decreasing=TRUE))
+# print(sort(table(filter(farm_to_nonfarm, (OCC.y != 0) & (IND.y != 0))$OCC.y),decreasing=TRUE))
+
+# Seeing if farmers worked different hours year to year
+# print(quantile(filter(farm_to_farm, (AHRSWORK1.x != 999) & (AHRSWORK1.y != 999))$AHRSWORK1.x, c(0.75, 0.9, 0.95), na.rm=TRUE))
+# print(quantile(filter(farm_to_farm, (AHRSWORK1.x != 999) & (AHRSWORK1.y != 999))$AHRSWORK1.y, c(0.75, 0.9, 0.95), na.rm=TRUE))
+
+# Seeing if farmers picked up another job
+# multjob = filter(farm_to_farm, (MULTJOB.x > 0) & (MULTJOB.y > 0))
+# print(mean(multjob$MULTJOB.y - multjob$MULTJOB.x))
+
+# Seeing if other industries picked up another job
+# multjob = filter(nonfarm_to_nonfarm, (MULTJOB.x > 0) & (MULTJOB.y > 0))
+# print(mean(multjob$MULTJOB.y - multjob$MULTJOB.x))
+
+# Seeing how many jobs farmers have
+# print(farm_to_farm$NUMJOB.y - farm_to_farm$NUMJOB.x)
+
+
+
+
+
+
+
+
+
+years = 2016:2021
+months = 1:12
+earnings.df_list = list()
+ind_codes = list(farming_ind_codes, 300:9590)
+ind.name = c('Farming', 'Manufacturing')
+for (i in 1:length(ind_codes)) {
+   earnings.vector = numeric(length(years) * length(months))
+   date.vector = character(length(years) * length(months))
+   for (j in 1:length(years)) {
+      for (k in 1:length(months)) {
+         if ((years[j] == 2021) & (k > 9)) {
+            break
+         }
+         temp = filter(get_data(years[j], months[k], CA, ind_codes[[i]]), HOURWAGE != 999.99)
+         print(unique(temp$IND))
+         earnings.vector[j*k] = mean(temp$HOURWAGE, na.rm=TRUE)
+         date.vector[j*k] = sprintf("%d-%02d-01", years[j], months[k])
+      }
+   }
+   earnings.df_ind = data.frame(date = as.Date(date.vector, format="%Y-%m-%d"), earnings = earnings.vector, ind = ind.name[i])
+   earnings.df_list[[i]] = earnings.df_ind
+}
+earnings.df = rbindlist(earnings.df_list)
+ggplot(earnings.df, aes(x=date, y=earnings, color=ind)) + 
+   geom_line() +
+   scale_x_date(date_breaks="6 months", date_labels="%b %Y") +
+   geom_vline(xintercept=as.Date("2019-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+   geom_vline(xintercept=as.Date("2020-01-01", format="%Y-%m-%d"), linetype="dashed") + 
+   geom_vline(xintercept=as.Date("2021-01-01", format="%Y-%m-%d"), linetype="dashed")
+
+
+
+

@@ -1,0 +1,208 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(sandwich)
+library(lmtest)
+library(seas)
+library(lubridate)
+library(Synth)
+library(SCtools)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+data = read.csv("cps_00007.csv")
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNWEEK') {
+    df = filter(df, EARNWEEK != 9999.99)
+    df$DEPVAR = log(df$EARNWEEK)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'OTPAY') {
+    df = filter(df, OTPAY != 99)
+    df$DEPVAR = ifelse(df$OTPAY == 2, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+season_to_date = function(df) {
+  df$date = ""
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=2, "MAM"=5, "JJA"=8, "SON"=11)
+      df$date[(df$YEAR == y) & (df$SEAS == s)] = 
+        sprintf("%d-%02d-01", y, m)
+    }
+  }
+  df$date = as.Date(df$date, format="%Y-%m-%d")
+  return(df)
+}
+
+remove_units = function(df, unit) {
+  df = filter(df, !is.na(DEPVAR))
+  unit_set = unique(df[[unit]])
+  for (d in unique(df$date)) {
+    unit_set = intersect(unit_set, filter(df, date == d)[[unit]])
+  }
+  df = df[df[[unit]] %in% unit_set,]
+  return(df)
+}
+
+gsc = function(dep_var,
+               start_year, 
+               agg_ind,
+               remove_covid) {
+  treat_date = as.Date("2018-11-01", format="%Y-%m-%d")
+  df = filter(data, (IND > 0) &
+                (YEAR >= start_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  df$IND = ifelse(df$IND %in% ind_groups[[1]], 1, 0)
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  # Choose months before COVID
+  if (remove_covid) {
+    df = filter(df, YEAR <= 2020)
+    df = filter(df, (YEAR < 2020) | (MONTH < 3))
+  }
+  
+  # Code in seasons and adjust December to be counted in next year's winter
+  df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                    format="%Y-%m-%d")
+  df$SEASON <- mkseas(x = df, width = "DJF")
+  df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+  
+  # Filter out winter of 2019, due to overlap
+  df = filter(df, (YEAR != 2019) | (SEASON != "DJF"))
+  
+  # Keep only states and industries which have data for all years
+  df = remove_units(df, state)
+  
+  # Aggregate by pre/post, season, state, and ind
+  df$DEPVAR = df$DEPVAR * df$WEIGHT
+  df = setDT(df)[,lapply(.SD, sum, na.rm=T), by=.(YEAR, SEASON, IND, STATEFIP)]
+  df$DEPVAR = df$DEPVAR / df$WEIGHT
+  
+  # Calculate gaps
+  df = reshape(df, direction = "wide", idvar=c('YEAR', 'SEASON', 'STATEFIP'), timevar='IND')
+  df$DEPVAR = df$DEPVAR.1 - df$DEPVAR.0
+  
+  # Get everything ready for synth
+  df = season_to_date(df)
+  df$TIME = as.numeric(df$date) 
+  df$UNITNAME = as.character(df$STATEFIP)
+  
+  df = remove_units(df, state)
+  
+  control_codes = setdiff(unique(df$STATEFIP), 6)
+  opt_window = setdiff(unique(df$TIME), as.numeric(treat_date)+1:max(df$TIME))
+  sp_predictors = list()
+  for (i in 1:(length(opt_window)-1)) {
+    sp_predictors[[i]] = list('DEPVAR', opt_window[i], 'mean')
+  }
+  dataprep.out <- dataprep(foo = df,
+                           dependent = 'DEPVAR',
+                           predictors = 'DEPVAR',
+                           predictors.op = 'mean',
+                           time.predictors.prior = as.numeric(treat_date), 
+                           special.predictors = sp_predictors,
+                           unit.variable = 'STATEFIP',
+                           unit.names.variable = 'UNITNAME',
+                           time.variable = 'TIME',
+                           treatment.identifier = 6,
+                           controls.identifier = control_codes,
+                           time.optimize.ssr = sort(opt_window),
+                           time.plot = sort(unique(df$date)))
+  return(dataprep.out)
+}
+
+dataprep.out = triple_synth(dep_var='AHRSWORK1',
+                            start_year=2012,
+                            agg_ind=TRUE,
+                            remove_covid=FALSE)
+synth.out = synth(dataprep.out, Sigf.ipop=5, strategy='multiprocess')
+
+# Plot paths of treated and synthetic
+path.plot(synth.res = synth.out,
+          dataprep.res = dataprep.out)
+# Plot differences between treated and synthetic
+gaps.plot(synth.res = synth.out,
+          dataprep.res = dataprep.out)
+
+# Print weights
+round(synth.out$solution.w,2)
+
+# Create placebos and test
+tdf <- generate.placebos(dataprep.out, synth.out, Sigf.ipop = 5, strategy='multiprocess')
+ratio <- mspe.test(tdf)
+ratio$p.val
+plot_placebos(tdf, discard.extreme = TRUE)
+mspe.plot(tdf, discard.extreme = TRUE)
+

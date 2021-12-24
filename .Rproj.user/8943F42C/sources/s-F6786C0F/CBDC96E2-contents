@@ -1,0 +1,194 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(synthdid)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv("california.csv")
+farmer_data = read.csv("farmers.csv")
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNWEEK') {
+    df = filter(df, EARNWEEK != 9999.99)
+    df$DEPVAR = log(df$EARNWEEK)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+season_to_date = function(df) {
+  df$DATE = ""
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=2, "MAM"=5, "JJA"=8, "SON"=11)
+      df$DATE[(df$YEAR == y) & (df$SEAS == s)] = 
+        sprintf("%d-%02d-01", y, m)
+    }
+  }
+  df$DATE = as.Date(df$DATE, format="%Y-%m-%d")
+  return(df)
+}
+
+remove_units = function(df) {
+  df = filter(df, !is.na(DEPVAR))
+  unit_set = unique(df$UNIT)
+  for (d in unique(df$DATE)) {
+    unit_set = intersect(unit_set, filter(df, DATE == d)$UNIT)
+  }
+  df = filter(df, UNIT %in% unit_set)
+  return(df)
+}
+
+synthdid = function(unit,
+                    dep_var,
+                    start_year, 
+                    remove_covid = TRUE) {
+  if (unit == state) {
+    data = farmer_data
+    treated_set = 6
+  } else if (unit == ind) {
+    data = ca_data
+    treated_set = 1
+  }
+  treat_date = as.Date("2018-11-01", format="%Y-%m-%d")
+  df = filter(data, (YEAR >= start_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  if(unit == ind) {
+    for (i in 1:52) {
+      df$IND[df$IND %in% ind_groups[[i]]] = i
+    }
+  }
+  df$UNIT = df[[unit]]
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  # Choose months before COVID
+  if (remove_covid) {
+    df = filter(df, YEAR <= 2020)
+    df = filter(df, (YEAR < 2020) | (MONTH < 3))
+  }
+  
+  # Code in seasons and adjust December to be counted in next year's winter
+  df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                    format="%Y-%m-%d")
+  df$SEASON <- mkseas(x = df, width = "DJF")
+  df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+  
+  # Aggregate by year, season, and unit
+  df = setDT(df)[,lapply(.SD, weighted.mean, WEIGHT, na.rm=T), by=.(YEAR, SEASON, UNIT)]
+  
+  # Filter out winter of 2019, due to overlap
+  df = filter(df, (YEAR != 2019) | (SEASON != "DJF"))
+  
+  # Convert season info to date
+  df = season_to_date(df)
+  
+  # Keep only units which have data for all years
+  df = remove_units(df)
+  
+  # Set control variables
+  control_codes = setdiff(unique(df$UNIT), treated_set)
+  
+  # Convert everything to time, because synthdid requires numeric
+  df$TIME = as.numeric(df$DATE) 
+  
+  df$TREAT = ifelse((df$YEAR >= 2019) & (df$UNIT %in% treated_set), 1, 0)
+
+  setup = panel.matrices(df, 
+                         unit='UNIT', 
+                         time='TIME',
+                         outcome='DEPVAR',
+                         treatment='TREAT')
+  return(setup)
+}
+
+setup = synthdid(ind, 
+                 dep_var='AHRSWORK1',
+                 start_year=2007, 
+                 remove_covid=FALSE)
+
+tau.hat = synthdid_estimate(setup$Y, setup$N0, setup$T0)
+tau.sc = sc_estimate(setup$Y, setup$N0, setup$T0)
+tau.did = did_estimate(setup$Y, setup$N0, setup$T0)
+
+estimates = list(tau.did, tau.sc, tau.hat)
+names(estimates) = c('Diff-in-Diff', 'Synthetic Control', 'Synthetic Diff-in-Diff')
+synthdid_plot(estimates, se.method='placebo')
+
+top.controls = synthdid_controls(estimates[[3]])[1:10, , drop=FALSE]
+plot(estimates[[3]], spaghetti.units=rownames(top.controls))
+synthdid_units_plot(estimates[[3]], units = rownames(top.controls))
+
+# Forestry, logging, fishing, hunting, and trapping
+# Mining
+# Construction
+# Transportation and warehousing
+# Educational services
+# Waste management and remediation services
+# Food services and drinking places
+
+test = filter(ca_data, (YEAR >= 2016) &
+              (IND > 0) &
+              (YEAR < 2019) &
+              (ASECFLAG %in% c(NA, 2)))
+test = dplyr::select(test, IND, EDUC, MARST, CITIZEN, SEX, RACE, HISPAN, METRO, WTFINL)
+test$highschool = ifelse(test$EDUC >= 73, 1, 0)
+test$bachelors = ifelse(test$EDUC >= 111, 1, 0)
+test$married = ifelse(test$MARST == 1, 1, 0)
+test$notcitizen = ifelse(test$CITIZEN == 5, 1, 0)
+test$male = ifelse(test$SEX == 1, 1, 0)
+test$white = ifelse(test$RACE == 100, 1, 0)
+test$hispanic = ifelse(test$HISPAN != 0, 1, 0)
+test$city = ifelse(test$METRO == 2, 1, 0)
+test$suburb = ifelse(test$METRO > 2, 1, 0)
+
+test$IND[test$IND %in% c(170, 280, 290)] = 0
+
+test = setDT(test)[,lapply(.SD, weighted.mean, WTFINL, na.rm=T), by=.(IND)]
+
+ind = 0
+test_ind = test - c(test[which(test$IND == ind), ])
+test_ind$IND = test_ind$IND + ind
+test_ind = abs(test_ind)
+ind_set = test_ind$IND
+ind_set = intersect(ind_set, test_ind[order(highschool),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(bachelors),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(married),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(notcitizen),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(male),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(white),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(hispanic),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(city),]$IND[1:100])
+ind_set = intersect(ind_set, test_ind[order(suburb),]$IND[1:100])
+ind_set
+
+# 7790: Waste management and remediation services
+# 4470: Groceries and related products, merchant wholesalers
+# 2780: Metal forgings and stampings
+# 1290: Not specified food industries
+
+
+
+
+
+
+
+
+
+
+

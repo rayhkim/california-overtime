@@ -1,0 +1,135 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(gsynth)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv("california.csv")
+farmer_data = read.csv("farmers.csv")
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNWEEK') {
+    df = filter(df, EARNWEEK != 9999.99)
+    df$DEPVAR = log(df$EARNWEEK)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+season_to_date = function(df) {
+  df$DATE = ""
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=2, "MAM"=5, "JJA"=8, "SON"=11)
+      df$DATE[(df$YEAR == y) & (df$SEAS == s)] = 
+        sprintf("%d-%02d-01", y, m)
+    }
+  }
+  df$DATE = as.Date(df$DATE, format="%Y-%m-%d")
+  return(df)
+}
+
+remove_units = function(df) {
+  df = filter(df, !is.na(DEPVAR))
+  unit_set = unique(df$UNIT)
+  for (d in unique(df$DATE)) {
+    unit_set = intersect(unit_set, filter(df, DATE == d)$UNIT)
+  }
+  df = filter(df, UNIT %in% unit_set)
+  return(df)
+}
+
+gsc = function(unit,
+               dep_var,
+               start_year, 
+               remove_covid = TRUE) {
+  if (unit == state) {
+    data = farmer_data
+    treated_set = 6
+  } else if (unit == ind) {
+    data = ca_data
+    treated_set = c(170, 180, 290)
+  }
+  treat_date = as.Date("2018-11-01", format="%Y-%m-%d")
+  df = filter(data, (YEAR >= start_year) &
+                (IND > 0) &
+                (ASECFLAG %in% c(NA, 2)))
+  df$UNIT = df[[unit]]
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  # Choose months before COVID
+  if (remove_covid) {
+    df = filter(df, YEAR <= 2020)
+    df = filter(df, (YEAR < 2020) | (MONTH < 3))
+  }
+  
+  # Code in seasons and adjust December to be counted in next year's winter
+  df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                    format="%Y-%m-%d")
+  df$SEASON <- mkseas(x = df, width = "DJF")
+  df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+  
+  # Aggregate by year, season, and unit
+  df = setDT(df)[,lapply(.SD, weighted.mean, WEIGHT, na.rm=T), by=.(YEAR, SEASON, UNIT)]
+  
+  # Filter out winter of 2019, due to overlap
+  df = filter(df, (YEAR != 2019) | (SEASON != "DJF"))
+  
+  # Convert season info to date
+  df = season_to_date(df)
+  
+  # Keep only units which have data for all years
+  df = remove_units(df)
+  
+  # Convert everything to time, because synthdid requires numeric
+  df$TIME = as.numeric(df$DATE) 
+  
+  df$TREAT = ifelse((df$YEAR >= 2019) & (df$UNIT %in% treated_set), 1, 0)
+  
+  out = gsynth(DEPVAR ~ TREAT,
+               data=df,
+               index = c('UNIT','TIME'),
+               force = "two-way",
+               CV = TRUE,
+               r = c(0, 5),
+               se = TRUE,
+               inference = "parametric", 
+               nboots = 1000, 
+               parallel = TRUE)
+  
+  return(out)
+}
+
+out = gsc(ind, 
+          dep_var='AHRSWORK1',
+          start_year=2007, 
+          remove_covid=FALSE)
+
+print(out)
+out$est.att
+out$est.avg
+out$est.beta
+out$wgt.implied
+
+cumu1 <- cumuEff(out, cumu = TRUE, id = NULL)
+cumu1$est.catt
+
+plot(out, type = "counterfactual")
+plot(out, type="counterfactual", id = 170)
+plot(out)
+

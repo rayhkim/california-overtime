@@ -1,0 +1,390 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(sandwich)
+library(lmtest)
+library(lubridate)
+library(stargazer)
+library(here)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv(here("data", "california.csv"))
+farmer_data = read.csv(here("data", "farmers.csv"))
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+treated_ind = 1
+treated_occ = 6050
+
+# Greater than 15% work minimum wage every year, removed those with few values
+inds = c(1, 46)
+# Greater than 20% work minimum wage every year, removed those with few values
+occs = c(4020, 4720, 4110, 9640, 6050)
+
+set_min_wage = function(df, level) {
+  df$MINWAGE = 999.99
+  df$MINWAGE[df$YEAR == 2007] = 7.5
+  df$MINWAGE[df$YEAR %in% 2008:2013] = 8
+  df$MINWAGE[(df$YEAR == 2014) & (df$MONTH < 7)] = 8
+  df$MINWAGE[(df$YEAR == 2014) & (df$MONTH >= 7)] = 9
+  df$MINWAGE[df$YEAR == 2015] = 9
+  df$MINWAGE[df$YEAR == 2016] = 10
+  if (level == 1) {
+    df$MINWAGE[df$YEAR == 2017] = 10
+    df$MINWAGE[df$YEAR == 2018] = 10.5
+    df$MINWAGE[df$YEAR == 2019] = 11
+    df$MINWAGE[df$YEAR == 2020] = 12
+    df$MINWAGE[df$YEAR == 2021] = 13
+  } else {
+    df$MINWAGE[df$YEAR == 2017] = 10.5
+    df$MINWAGE[df$YEAR == 2018] = 11
+    df$MINWAGE[df$YEAR == 2019] = 12
+    df$MINWAGE[df$YEAR == 2020] = 13
+    df$MINWAGE[df$YEAR == 2021] = 14
+  }
+  return(df)
+}
+
+set_earnings = function(df) {
+  df$STANDARDHOURS = 40
+  df$STANDARDHOURS[(df$YEAR <= 2018) & (df$ID == '1-6050')] = 60
+  df$STANDARDHOURS[(df$YEAR == 2019) & (df$ID == '1-6050')] = 55
+  df$STANDARDHOURS[(df$YEAR == 2020) & (df$ID == '1-6050')] = 50
+  df$STANDARDHOURS[(df$YEAR == 2021) & (df$ID == '1-6050')] = 45
+  df$STANDARDHOURS[(df$YEAR == 2021) & (df$OCC == 9130)] = 999
+
+  df$EARNINGS = 0
+  df$EARNINGS = df$HOURWAGE * df$AHRSWORK1
+  df[df$AHRSWORK1 > df$STANDARDHOURS,]$EARNINGS = df[df$AHRSWORK1 > df$STANDARDHOURS,]$EARNINGS +
+    0.5 * df[df$AHRSWORK1 > df$STANDARDHOURS,]$HOURWAGE *
+    (df[df$AHRSWORK1 > df$STANDARDHOURS,]$AHRSWORK1 - df[df$AHRSWORK1 > df$STANDARDHOURS,]$STANDARDHOURS)
+  return(df)
+}
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999, AHRSWORK1 > 0)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'EARNINGS') {
+    df = filter(df, HOURWAGE != 999.99,
+                AHRSWORK1 != 999,
+                AHRSWORK1 > 0)
+    df = set_earnings(df)
+    df$DEPVAR = df$EARNINGS
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNINGS') {
+    df = filter(df, HOURWAGE != 999.99,
+                AHRSWORK1 != 999,
+                AHRSWORK1 > 0)
+    df = set_earnings(df)
+    df$DEPVAR = log(df$EARNINGS)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = df$HOURWAGE
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'OTPAY') {
+    df = filter(df, OTPAY != 99)
+    df$DEPVAR = ifelse(df$OTPAY == 2, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'MULTJOB') {
+    df = filter(df, MULTJOB != 0)
+    df$DEPVAR = ifelse(df$MULTJOB == 2, 1, 0)
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'MINWAGE1') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'MINWAGE2') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 2)
+    df = filter(df, HOURWAGE >= MINWAGE)
+    df$DEPVAR = ifelse(df$HOURWAGE == df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  else if (dep_var == 'BELOW_MINWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df = set_min_wage(df, 1)
+    df$DEPVAR = ifelse(df$HOURWAGE < df$MINWAGE, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+
+get_data = function(start_year, end_year, dep_var, control_codes) {
+  df = filter(ca_data, (IND > 0) &
+                (OCC > 0) &
+                (YEAR >= start_year) &
+                (YEAR <= end_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  df$ID = sprintf("%d-%d", df$IND, df$OCC)
+  df = filter(df, ID %in% c('1-6050', control_codes))
+  df = process_dep_var(df, dep_var)
+  return(df)
+}
+
+add_controls = function(df) {
+  df$HIGHSCHOOL = ifelse(df$EDUC >= 73, 1, 0)
+  df$MARRIED = ifelse(df$MARST == 1, 1, 0)
+  df$MALE = ifelse(df$SEX == 1, 1, 0)
+  df$WHITE = ifelse(df$RACE == 100, 1, 0)
+  df$HISPANIC = ifelse(df$HISPAN != 0, 1, 0)
+  df$CITY = ifelse(df$METRO == 2, 1, 0)
+  df$SUBURB = ifelse(df$METRO > 2, 1, 0)
+
+  df = dplyr::select(df, DEPVAR, WEIGHT, YEAR, MONTH, ID, IND, OCC,
+                     AGE, HIGHSCHOOL, MARRIED,
+                     MALE, WHITE, HISPANIC,
+                     CITY, SUBURB)
+
+  return(df)
+}
+
+find_mean = function(df) {
+  df$TREAT = ifelse(df$ID == '1-6050', 1, 0)
+  df$DEPVAR = df$DEPVAR * df$WEIGHT
+  df = setDT(select(df,-ID))[,lapply(.SD, sum, na.rm=T), by=.(YEAR, TREAT)]
+  df$DEPVAR = df$DEPVAR / df$WEIGHT
+  return(df)
+}
+
+did = function(df, treat_year) {
+  df$TREAT = ifelse(df$ID == '1-6050', 1, 0)
+  df$DID1 = df$TREAT * ifelse(df$YEAR >= treat_year-1, 1, 0)
+  df$DID2 = df$TREAT * ifelse(df$YEAR >= treat_year, 1, 0)
+
+  df$ID = factor(df$ID)
+  df = within(df, ID <- relevel(ID, ref=2))
+  reg = df %>%
+    mutate(
+      YEAR = factor(YEAR),
+      MONTH = factor(MONTH)
+    ) %>%
+    lm(DEPVAR ~ DID1 + DID2,
+       data=., weights=WEIGHT)
+
+  return(reg)
+}
+did_fe = function(df, treat_year) {
+  df$TREAT = ifelse(df$ID == '1-6050', 1, 0)
+  df$DID1 = df$TREAT * ifelse(df$YEAR >= treat_year-3, 1, 0)
+  df$DID2 = df$TREAT * ifelse(df$YEAR >= treat_year-2, 1, 0)
+  df$DID3 = df$TREAT * ifelse(df$YEAR >= treat_year-1, 1, 0)
+  df$DID4 = df$TREAT * ifelse(df$YEAR >= treat_year, 1, 0)
+  
+  df$ID = factor(df$ID)
+  df = within(df, ID <- relevel(ID, ref=2))
+  df$DEPVAR1 = df$DEPVAR
+  reg = df %>%
+    mutate(
+      YEAR = factor(YEAR),
+      MONTH = factor(MONTH)
+    ) %>%
+    lm(DEPVAR ~ DID1 + DID2 + DID3 + DID4 + ID + YEAR,
+       data=., weights=WEIGHT)
+  
+  return(reg)
+}
+did_controls_fe = function(df, treat_year) {
+  df$TREAT = ifelse(df$ID == '1-6050', 1, 0)
+  df$DID1 = df$TREAT * ifelse(df$YEAR >= treat_year-3, 1, 0)
+  df$DID2 = df$TREAT * ifelse(df$YEAR >= treat_year-2, 1, 0)
+  df$DID3 = df$TREAT * ifelse(df$YEAR >= treat_year-1, 1, 0)
+  df$DID4 = df$TREAT * ifelse(df$YEAR >= treat_year, 1, 0)
+  
+  df$ID = factor(df$ID)
+  df = within(df, ID <- relevel(ID, ref=2))
+  df$DEPVAR1 = df$DEPVAR
+  reg = df %>%
+    mutate(
+      YEAR = factor(YEAR),
+      MONTH = factor(MONTH)
+    ) %>%
+    lm(DEPVAR ~  DID1 + DID2 + DID3 + DID4 + ID + YEAR + 
+         log(AGE) + HIGHSCHOOL + MARRIED + MALE + WHITE + CITY + SUBURB,
+       data=., weights=WEIGHT)
+  
+  return(reg)
+}
+
+wrapper <- function(x, ...) 
+{
+  paste(strwrap(x, ...), collapse = "\n")
+}
+plot_data = function(df, title, x, y) {
+  df$DATE = make_date(df$YEAR, 1, 1)
+  p = ggplot(df, aes(y=DEPVAR, x=DATE, color=factor(TREAT))) +
+    geom_line(size=2) +
+    scale_x_date(date_breaks = "years" , date_labels = "%Y") +
+    scale_color_discrete(labels = c("Control", "Treatment")) +
+    labs(title = title, x = x, y = y, color="Group") +
+    theme(text=element_text(family="serif"),
+          plot.margin = unit(c(1, 1, 1, 1), "cm"))
+  return(p)
+}
+
+reg = 0
+start_year = 2016
+treat_year = 2020
+dep_var = 'MINWAGE1'
+### '22-9130', '23-9130'
+### '46-4110', '46-4720'
+control_codes = c('46-4110', '46-4720')
+control_codes2 = c("46-4720", "46-4110", "46-4030", "22-4720")
+df = get_data(start_year, treat_year, dep_var, control_codes2)
+df4 = find_mean(df)
+
+
+
+
+
+
+
+
+
+p1 = plot_data(df1, "Evolution of Hourly Wage from 2016-2020", "Year", "hourwage")
+p2 = plot_data(df2, "Evolution of Log-Transformed Hourly Wage from 2016-2020", "Year", "log(hourwage)")
+p3 = plot_data(df3, "Evolution of Proportion at O25 Min. Wage from 2016-2020", "Year", "minwageo25")
+p4 = plot_data(df4, "Evolution of Proportion at U25 Min. Wage from 2016-2020", "Year", "minwageu25")
+
+
+p = ggarrange(p1, p2, p3, p4, 
+          ncol = 2, nrow = 2)
+
+local({
+  on.exit(dev.off())
+  tikz('did-plots.tex',
+       width = 16, 
+       height = 10)
+  print(p)
+})
+
+
+
+
+# Relative to standard hours
+treat_standard = 60
+standard = 60
+
+# df$DEPVAR = ifelse((df$DEPVAR >= 55) & (df$DEPVAR < 60), 1, 0)
+
+if (reg == 1) {
+  df$DEPVAR = ifelse(((df$TREAT) & (df$DEPVAR == treat_standard-5)) |
+                       ((!df$TREAT) & (df$DEPVAR == standard-5)), 1, 0)
+} else if (reg == 2) {
+  df$DEPVAR = ifelse(((df$TREAT) & (df$DEPVAR == treat_standard)) |
+                       ((!df$TREAT) & (df$DEPVAR == standard)), 1, 0)
+} else if (reg == 3) {
+  df = filter(df, (TREAT & (DEPVAR >= treat_standard)) |
+                (!TREAT & (DEPVAR >= standard)))
+} else if (reg == 4) {
+  df$DEPVAR = ifelse(((df$TREAT) & (df$DEPVAR > treat_standard)) |
+                       ((!df$TREAT) & (df$DEPVAR > standard)), 1, 0)
+}
+
+df = add_controls(df)
+reg1 = did_fe(df, treat_year)
+reg2 = did_controls_fe(df, treat_year)
+
+df = find_mean(df)
+plot_data(df, "Untitled", "Year", "Dependent variable")
+
+
+
+stargazer(reg1, reg2, reg3, reg4, 
+          title="The Effect of Police Presence on Car Theft",
+          header=FALSE,
+          digits=3,
+          dep.var.caption="Difference-in-differences",
+          dep.var.labels.include = FALSE,
+          omit.stat=c('adj.rsq','f','ser'),
+          type = "latex")
+
+# df$HOURS = "kink"
+# df[((df$IND == 1) & (df$DEPVAR <= 60)) |
+#      ((df$IND != 1) & (df$DEPVAR <= 40)),]$HOURS = "below"
+# df[((df$IND == 1) & (df$DEPVAR > 60)) |
+#      ((df$IND != 1) & (df$DEPVAR > 40)),]$HOURS = "above"
+# df$HOURS = factor(df$HOURS)
+#
+# train = filter(df, IND == 1, YEAR %in% 2016:2017)
+# test = filter(df, YEAR == 2018)
+#
+# set.seed(42)
+# min_obs = min(table(train$HOURS))
+# rf = randomForest(HOURS~.-DEPVAR-UNIT-WEIGHT-YEAR,train,
+#                   ntree=1000,
+#                   sampsize=rep(min_obs, 2),
+#                   strata=train$HOURS,
+#                   replace=TRUE)
+# print(rf)
+# pred = predict(rf, filter(test, IND == 1))
+# table(observed = filter(test, IND == 1)$HOURS, predicted = pred)
+
+
+
+

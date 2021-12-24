@@ -1,0 +1,244 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(seas)
+library(lubridate)
+library(reshape2)
+library(knitr)
+library(kableExtra)
+library(here)
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+ca_data = read.csv(here("data", "california.csv"))
+farmer_data = read.csv(here("data", "farmers.csv"))
+
+season_to_date = function(df) {
+  df$END = as.Date(x = integer(0), origin = "1970-01-01")
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=3, "MAM"=6, "JJA"=9, "SON"=12)
+      df$END[(df$YEAR == y) & (df$SEAS == s)] = 
+        make_date(y, m, 1)
+    }
+  }
+  df$START = df$END %m-% months(3)
+  df$END = df$END %m-% days(1)
+  df$MID = df$START + (df$END - df$START) / 2
+  return(df)
+}
+
+
+
+### Hours worked
+df = filter(ca_data,
+            (YEAR >= 2007) &
+            (IND > 0) &
+            (AHRSWORK1 != 999) &
+            (ASECFLAG %in% c(NA, 2)))
+df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                  format="%Y-%m-%d")
+df$SEASON <- mkseas(x = df, width = "DJF")
+df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+
+for (i in 1:52) {
+  df$IND[df$IND %in% ind_groups[[i]]] = i
+}
+df = setDT(df)[,lapply(.SD, weighted.mean, WTFINL, na.rm=T), by=.(YEAR, SEASON, IND)]
+
+df = season_to_date(df)
+
+ggplot(df, aes(x=MID, y=AHRSWORK1, group=IND)) +
+  geom_rect(aes(xmin=START, xmax=END, ymin=-Inf, ymax=Inf, fill=SEASON)) +
+  geom_line(aes(color=factor(IND))) + 
+  # geom_point(aes(shape=factor(IND)), size=2, show.legend = FALSE) +
+  scale_fill_manual(name="Season",
+                    values = c("#bbbbbb", "#cccccc", "#dddddd", "#eeeeee"),
+                    labels = c("Winter", "Spring", "Summer", "Fall")) +
+  labs(title = "Average weekly hours worked in California agricultural industries by year and season",
+       x = "Year",
+       y = "Weekly hours worked") +
+  theme(text=element_text(family="serif")) +
+  geom_vline(xintercept=make_date(2019, 1, 1), linetype=5) +
+  scale_x_date(date_breaks = "years" , date_labels = "%Y")
+                  
+
+# 370:490
+# 770
+# 2470:2590
+# 3070:3291
+# 3960:3990
+# 1470:1790
+# 2170:2290
+
+
+
+
+
+### Histogram of hours worked
+df = filter(farmer_data, (STATEFIP == 6) &
+              (YEAR >= 2012) &
+              (AHRSWORK1 != 999) &
+              (ASECFLAG %in% c(NA, 2)))
+
+df$HOURS = cut(-df$AHRSWORK1, -c(-1, 40, 45, 50, 55, 168), right=FALSE)
+
+ggplot(df, aes(x=factor(YEAR), fill=HOURS)) +
+  geom_bar(position="fill") +
+  scale_fill_manual(name="Intervals",
+                    values = c("#1727ae", "#2c43b8", "#445bc1", "#6987d5", "#97baec"),
+                    labels = c("(55, 168]", "(50, 55]", "(45, 50]", "(40, 45]", "[0, 40]")) +
+  scale_x_discrete(labels = 2012:2021) + 
+  labs(title = "Hours worked per week in California agriculture",
+       x = "Year",
+       y = "") +
+  theme(text=element_text(family="serif"))
+
+
+
+
+
+
+
+
+
+### Median hourly wage
+df = filter(farmer_data, (STATEFIP == 6) &
+              (YEAR >= 2016) &
+              (HOURWAGE != 999.99) &
+              (ASECFLAG %in% c(NA, 2)))
+df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                  format="%Y-%m-%d")
+df$SEASON <- mkseas(x = df, width = "DJF")
+df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+
+df = setDT(df)[,lapply(.SD, median, na.rm=T), by=.(YEAR, SEASON, IND)]
+
+df = season_to_date(df)
+
+ggplot(df, aes(x=MID, y=HOURWAGE, group=IND)) +
+  geom_rect(aes(xmin=START, xmax=END, ymin=-Inf, ymax=Inf, fill=SEASON)) +
+  geom_line(aes(color=factor(IND))) + 
+  # geom_point(aes(shape=factor(IND)), size=2, show.legend = FALSE) +
+  scale_color_discrete(name="Industry",
+                       labels = c("Crop production", "Animal production", "Support activities")) +
+  scale_fill_manual(name="Season",
+                    values = c("#bbbbbb", "#cccccc", "#dddddd", "#eeeeee"),
+                    labels = c("Winter", "Spring", "Summer", "Fall")) +
+  labs(title = "Median hourly wage in California agricultural industries by year and season",
+       x = "Year",
+       y = "Median hourly wage") +
+  theme(text=element_text(family="serif")) +
+  geom_vline(xintercept=make_date(2019, 1, 1), linetype=5) +
+  scale_x_date(date_breaks = "years" , date_labels = "%Y")
+
+
+# Maybe try subtracting minimum wage from the wage for that year and regressing on that
+
+
+
+df = filter(ca_data, (YEAR >= 2012) &
+              (ASECFLAG %in% c(NA, 2)))
+
+df = dplyr::select(df, YEAR, IND)
+df$COUNT = 1
+df$IND[df$IND %in% 170:290] = -1
+df$IND[df$IND %in% 370:490] = -2
+df$IND[df$IND %in% 770] = -3
+df$IND[df$IND %in% 1070:3990] = -4
+df$IND[df$IND %in% 4070:5790] = -5
+df$IND[df$IND %in% c(6070:6390, 570:690)] = -6
+df$IND[df$IND %in% 7860:8470] = -7
+df$IND[df$IND %in% 8560:8690] = -8
+df$IND[df$IND %in% 8770:9290] = -9
+df = setDT(df)[,lapply(.SD, sum, na.rm=T), by=.(YEAR, IND)]
+
+new_df = data.table()
+new_df$year = sort(unique(df$YEAR))
+new_df$ind1 = filter(df, IND == -1)[order(YEAR),]$COUNT
+new_df$ind2 = filter(df, IND == -2)[order(YEAR),]$COUNT
+new_df$ind3 = filter(df, IND == -3)[order(YEAR),]$COUNT
+new_df$ind4 = filter(df, IND == -4)[order(YEAR),]$COUNT
+new_df$ind5 = filter(df, IND == -5)[order(YEAR),]$COUNT
+new_df$ind6 = filter(df, IND == -6)[order(YEAR),]$COUNT
+new_df$ind7 = filter(df, IND == -7)[order(YEAR),]$COUNT
+new_df$ind8 = filter(df, IND == -8)[order(YEAR),]$COUNT
+new_df$ind9 = filter(df, IND == -9)[order(YEAR),]$COUNT
+
+sample_size = kable(new_df, format = "latex",
+                    align = "cccccccccc",
+                    caption = "Sample size of workers in California by industry groups",
+                    col.names = c("Year", 
+                                  "Agricul- ture, forestry, fishing, and hunting",
+                                  "Mining", 
+                                  "Constr- uction",
+                                  "Manufa- cturing",
+                                  "Whole- sale and retail trade",
+                                  "Transpo- rtation and utilities",
+                                  "Educat- ional and health services",
+                                  "Leisure and hospitality",
+                                  "Other services")) %>%
+              column_spec(2:10, width = "1.5cm", latex_valign = "b") %>%
+              add_footnote("Note: The 2021 data is incomplete and ends in October", notation = 'none') %>%
+              kable_styling(position="center", latex_options = "hold_position") 
+
+fileConn<-file("tables/sample-size.tex")
+writeLines(sample_size, fileConn)
+close(fileConn)
+
+
+
+
+
+

@@ -1,0 +1,215 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(sandwich)
+library(lmtest)
+library(seas)
+library(lubridate)
+library(estimatr)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv("california.csv")
+farmer_data = read.csv("farmers.csv")
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNWEEK') {
+    df = filter(df, EARNWEEK != 9999.99)
+    df$DEPVAR = log(df$EARNWEEK)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'OTPAY') {
+    df = filter(df, OTPAY != 99)
+    df$DEPVAR = ifelse(df$OTPAY == 2, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+remove_units = function(df) {
+  df = filter(df, !is.na(DEPVAR))
+  unit_set = unique(df$UNIT)
+  for (d in unique(df$date)) {
+    unit_set = intersect(unit_set, filter(df, date == d)$UNIT)
+  }
+  df = filter(df, UNIT %in% unit_set)
+  return(df)
+}
+
+graph_did = function(dep_var,
+                     start_year) {
+  data = ca_data
+  df = filter(data, (IND > 0) &
+                (YEAR >= start_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  # df = filter(df, !(IND == 1) | (OCC == 6050))
+  # df$IND[df$IND > 1] = 0
+  df$UNIT = df$IND
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  df$date = make_date(df$YEAR, df$MONTH, 1)
+  
+  # Keep only units which have data for all years
+  df = remove_units(df)
+  
+  # Aggregate by year, season, and unit
+  df = setDT(df)[,lapply(.SD, weighted.mean, WEIGHT, na.rm=T), by=.(date, UNIT)]
+  
+  ggplot(filter(df, IND %in% c(1,46)), aes(y=DEPVAR, x=date, color=factor(UNIT))) +
+    geom_line() +
+    geom_vline(xintercept=make_date(2018, 12, 1), linetype=5) +
+    scale_x_date(date_breaks = "years" , date_labels = "%Y") +
+    scale_color_discrete(name="Industry",
+                       labels = c("Agriculture", "Food services and drinking places")) +
+    labs(title="Evolution of hours worked by industry", 
+         x="Date", 
+         y="Hours worked last week",
+         color="Industry") +
+    theme(text = element_text(size=9, family="serif"))
+}
+
+did = function(dep_var,
+               start_year, 
+               treat_year,
+               remove_covid) {
+  data = ca_data
+  df = filter(data, (IND > 0) &
+                (YEAR >= start_year) &
+                (YEAR <= treat_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  for (i in 1:52) {
+    df$IND[df$IND %in% ind_groups[[i]]] = i
+  }
+  # df = filter(df, !(IND == 1) | (OCC == 6050))
+  
+  # df$IND[df$IND > 1] = 0
+  df = filter(df, IND %in% c(1, 46))
+  df$UNIT = df$IND
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  df$date = make_date(df$YEAR, df$MONTH, 1)
+  
+  # Keep only units which have data for all years
+  df = remove_units(df)
+  
+  # Aggregate by year, season, and unit
+  df$POP = df$WEIGHT
+  df$DEPVAR = df$DEPVAR * df$WEIGHT
+  df = setDT(df)[,lapply(.SD, sum, na.rm=T), by=.(date, UNIT)]
+  df$DEPVAR = df$DEPVAR / df$WEIGHT
+  
+  # Set treatment window
+  df$TIME = ifelse(df$date >= make_date(treat_year, 1, 1), 1, 0)
+  
+  df$TREAT = df$TIME * ifelse(df$UNIT == 1, 1, 0)
+  
+  reg = df %>%
+    mutate(
+      UNIT = factor(UNIT),
+      date = factor(date)
+    ) %>%
+    lm(DEPVAR ~ TREAT + date + UNIT, data=.)
+  return(reg)
+}
+
+graph_did(dep_var='AHRSWORK1',
+          start_year=2016)
+
+reg3 = did(dep_var='AHRSWORK1',
+    start_year=2020,
+    treat_year=2021)
+
+# Difference between taking mean and doing DID and not taking mean
+# Try ignoring the time-series dimension and just aggregating pre and post
+# https://economics.mit.edu/files/750
+
+cov1 = vcovHC(reg1, type = "HC1")
+cov2 = vcovHC(reg2, type = "HC1")
+cov3 = vcovHC(reg3, type = "HC1")
+robust_se = list(sqrt(diag(cov1)), sqrt(diag(cov2)), sqrt(diag(cov3)))
+stargazer(reg1, reg2, reg3,
+          title="Effects of Overtime Legislation on Hours Worked",
+          header=FALSE,
+          digits=5,
+          covariate.labels=c("2019",
+                             "2020"),
+          keep=c('TREAT'),
+          omit.stat=c('adj.rsq','f','ser'),
+          add.lines=list(c('Block fixed effect','Yes','Yes','Yes'),
+                         c('Month fixed effect','Yes','Yes','Yes')),
+          se=robust_se,
+          type = "latex")
+
+

@@ -1,0 +1,187 @@
+---
+title: "Replication Exercise"
+author: "Ray Kim"
+output:
+  pdf_document:
+    keep_tex: yes
+---
+
+```{r setup, include=FALSE, size="small"}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  ifelse(options$size != "normalsize", paste0("\n \\", options$size,"\n\n", x, "\n\n \\normalsize"), x)
+})
+```
+
+# 1. Overview of Paper
+1. No, the estimated $\hat{\beta}$ does not capture the causal effect, because of an endogeneity problem—the number of police officers on duty might be because of the presence or lack of car thefts (and crime in general) in the area. Such a problem would cause $\hat{\beta}$ to be biased upward, as police presence reacts positively to a greater amount of car thefts, and negatively to a lower amount of car thefts.
+
+2. In 1994, terrorists targeted and bombed a Jewish center in Argentina, causing an increase in police presence around Jewish institutions. Because the distribution of Jewish institutions is very likely unrelated to crime, Di Tella and Schargrodsky use this event as a natural experiment to perform a difference-in-differences analysis of police presence on crime, using blocks with Jewish institutions as their treatment group, and blocks without as their control group. They also use the distance from of a block to the nearest institution as a covariate, and the number of car thefts as a dependent variable.
+
+3. The key identifying assumption in their research design is the parallel trends assumption—that although the treatment and control groups might have different levels of crime prior to the start of treatment, their trends in pre-treatment outcomes should be the same. In the particular context of their study, Di Tella and Schargrodsky confirm that the trends car thefts for blocks with a Jewish institution are parallel to those one, two, or more blocks away from a Jewish institution. They see that there are no discernible differences in the averages of these different groups prior to the terrorist attack.
+
+# 2. Setup
+```{r, message=FALSE, size="small"}
+if (!require('data.table')) install.packages('data.table'); library('data.table')
+if (!require('ggplot2')) install.packages('ggplot2'); library('ggplot2')
+if (!require('dplyr')) install.packages('dplyr'); library('dplyr')
+if (!require('plm')) install.packages('plm'); library('plm')
+if (!require('lmtest')) install.packages('lmtest'); library('lmtest')
+if (!require('knitr')) install.packages('knitr'); library('knitr')
+if (!require('tidyr')) install.packages('tidyr'); library('tidyr')
+if (!require('kableExtra')) install.packages('kableExtra'); library('kableExtra')
+if (!require('stargazer')) install.packages('stargazer'); library('stargazer')
+
+# Replace with correct working directory containing DataClean.csv file
+setwd("/Users/rayhkim/Documents/classes/econ191/replication")
+data <- read.csv('DataClean.csv')
+```
+
+\newpage
+
+# 3. Data Creation
+1.
+```{r, indent = "     "}
+data$category <- data$distanci+1
+data$category[data$category > 4] <- 4
+```
+2.
+```{r, indent = "     "}
+data <- filter(data, mes != 72)
+```
+3.
+```{r, indent = "     "}
+data$month <- data$mes
+data$month[data$month > 7] <- data$month[data$month > 7] + 1
+```
+4.
+```{r, indent = "     "}
+data$month[data$month == 74] <- 8
+```
+5.
+```{r, indent = "     "}
+month_labs = c("April", "May", "June", "July(1-17)", "July(18-31)", 
+               "August", "September", "October", "November", "December")
+data$month = factor(data$month, labels=month_labs)
+```
+6.
+```{r, indent = "     "}
+write.csv(data, "DataClean.csv")
+```
+
+\newpage
+
+# 4. Descriptives
+
+1. 
+
+```{r, echo=FALSE, results = 'asis', fig.width=7, fig.height=3, fig.align="center"}
+thefts.avg = aggregate(totrob~month+category, data, 
+                       function(x) trunc(mean(x)*10^5)/10^5)
+
+ggplot(thefts.avg, aes(month, totrob, group=category, color=as.factor(category))) +
+  geom_line() +
+  labs(title="Evolution of Average car thefts by category", 
+       x="Months", 
+       y="Average number of car thefts",
+       color="Category") +
+   theme(text = element_text(size=9, family="serif"),
+         axis.text = element_text(size = 7)) 
+```
+
+2.
+
+```{r, echo=FALSE, results = 'asis'}
+thefts.sd = aggregate(totrob~month+category, data, 
+                      function(x) trunc(sd(x)*10^3)/10^3)
+
+thefts.avg.wide <- spread(thefts.avg, category, totrob)
+thefts.sd.wide <- spread(thefts.sd, category, totrob)
+
+merge_string = function(x) sprintf("%0.5f\n(%0.3f)", x[1], x[2])
+
+thefts.summary = rbindlist(
+  list(thefts.avg.wide, 
+       thefts.sd.wide))[,lapply(.SD, merge_string), by=month]
+thefts.n = data %>% 
+    count(category) / 10
+thefts.summary = rbind(thefts.summary, data.frame(month = "Number of blocks", 
+                                                  `1`=thefts.n$n[1], 
+                                                  `2`=thefts.n$n[2],
+                                                  `3`=thefts.n$n[3],
+                                                  `4`=thefts.n$n[4],
+                                                  check.names=FALSE))
+thefts.summary = thefts.summary[,c(1,5,2,3,4)]
+
+kable(thefts.summary,
+      format = "latex", 
+      align = "ccccc",
+      caption = "Monthly Evolution of Car Theft",
+      col.names = c("Month", 
+                    "Jewish institution on the block\n\n(A)",
+                    "One block from nearest Jewish institution\n(B)", 
+                    "Two blocks from nearest Jewish institution\n(C)", 
+                    "More than two blocks from nearest Jewish institution\n(D)")) %>%
+  column_spec(1:5, width = "1.5cm", latex_valign = "b") %>%
+  add_footnote("Notes: The columns present the mean and standard deviation (in parentheses) of the number of car thefts for each type of block per month. The average number of car thefts for July can be obtained by summing the subperiods. The last three columns present the differences of means of columns (B), (C), and (D) relative to column (A), with standard deviations in parentheses.", notation = 'none', threeparttable = TRUE) %>%
+  kable_styling(font_size = 7, position="center", latex_options = "hold_position") 
+```
+
+\newpage
+
+3. In the months before the terrorist attack, the frequency of car thefts on blocks with Jewish institutions appear to be similar to the frequency of car thefts on blocks farther from Jewish institutions, making them comparable. However, after the terrorist attack, blocks with Jewish institutions had significantly lower crime rates that blocks farther away, indicating a causal effect of increased police presence on crime (as measured by car thefts).
+
+# 5. Diff-in-Diff
+
+1.
+
+```{r, echo=FALSE, results = 'asis'}
+data$month = as.numeric(data$month)+3
+did = filter(data, month != 8)
+did$post = ifelse(did$month > 8, 1, 0)
+did$same_block = ifelse(did$distanci == 0, 1, 0) * did$post
+did$one_block = ifelse(did$distanci == 1, 1, 0) * did$post
+did$two_blocks = ifelse(did$distanci == 2, 1, 0) * did$post
+
+reg1 = lm(totrob~same_block+
+            factor(month)+factor(observ), did)
+reg2 = lm(totrob~same_block+one_block+
+            factor(month)+factor(observ), did)
+reg3 = lm(totrob~same_block+one_block+two_blocks+
+            factor(month)+factor(observ), did)
+
+cov1 = vcovHC(reg1, type = "HC1")
+cov2 = vcovHC(reg2, type = "HC1")
+cov3 = vcovHC(reg3, type = "HC1")
+robust_se = list(sqrt(diag(cov1)), sqrt(diag(cov2)), sqrt(diag(cov3)))
+
+stargazer(reg1, reg2, reg3,
+          title="The Effect of Police Presence on Car Theft",
+          header=FALSE,
+          digits=5,
+          covariate.labels=c("Same-Block Police",
+                           "One-Block Police",
+                           "Two-Blocks Police"),
+          dep.var.caption="Difference-in-difference",
+          dep.var.labels.include=FALSE,
+          keep=c('same_block','one_block','two_blocks'),
+          omit.stat=c('adj.rsq','f','ser'),
+          add.lines=list(c('Block fixed effect','Yes','Yes','Yes'),
+                         c('Month fixed effect','Yes','Yes','Yes')),
+          se=robust_se,
+          type = "latex",
+          notes.align = "l",
+          notes.append = FALSE,
+          notes.label = "",
+          notes=c("Notes: Dependent variable: number of car thefts per month per block.",
+                  "Least-squares dummy variables (LSDV) regressions. Car thefts that",
+                  "occurred between July 18 and July 31 are excluded. Huber-White",
+                  "standard errors are in parentheses.",
+                  "*** Significant at the 1-percent level"))
+```
+
+2. After controlling for block and month fixed effects, having a protected institution on a block decreases monthly car thefts by 0.07752, on average. 
+
+3. The authors include Table 4 as a robustness check, to ensure that the correlation that they are finding is not spurious. If their data reflects the causal effect of police presence on crime, running their difference-in-differences design at a time when their treatment group (blocks with Jewish institutions) was not treated should result in no significant difference in crimes, when comparing to their control group. Performing such robustness checks makes their results more believable, and less likely to be due to chance variation.

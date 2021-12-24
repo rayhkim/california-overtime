@@ -1,0 +1,194 @@
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(sandwich)
+library(lmtest)
+library(seas)
+library(lubridate)
+set.seed(42)
+
+setwd("/Users/rayhkim/Documents/classes/econ191/cps-standard/data")
+
+ca_data = read.csv("california.csv")
+farmer_data = read.csv("farmers.csv")
+
+ind_groups = list(c(170,180,290),
+                  190:280,
+                  370:490,
+                  770,
+                  2470:2590,
+                  2670:2990,
+                  3070:3291,
+                  3365:3390,
+                  c(3470, 3490),
+                  3570:3690,
+                  3770:3875,
+                  3895,
+                  3960:3990,
+                  1070:1290,
+                  c(1370, 1390),
+                  1470:1790,
+                  1870:1990,
+                  c(2070,2090),
+                  2170:2290,
+                  2370:2390,
+                  4070:4590,
+                  4670:5790,
+                  6070:6390,
+                  570:690,
+                  6470:6490,
+                  c(6570,6590),
+                  6670,
+                  6675,
+                  c(6680,6690),
+                  c(6692,6695),
+                  c(6770,6780),
+                  6870:6970,
+                  6990,
+                  7070,
+                  7080:7190,
+                  7270:7490,
+                  7570,
+                  7580:7780,
+                  7790,
+                  7860:7890,
+                  8190,
+                  7970:8180,
+                  8370:8470,
+                  8560:8590,
+                  c(8660,8670),
+                  c(8680,8690),
+                  8770:8890,
+                  8970:9090,
+                  9160:9190,
+                  9290,
+                  9370:9590,
+                  9890)
+
+# Units of analysis
+state = 'STATEFIP'
+ind = 'IND'
+
+process_dep_var = function(df, dep_var) {
+  if (dep_var == 'AHRSWORK1') {
+    df = filter(df, AHRSWORK1 != 999)
+    df$DEPVAR = df$AHRSWORK1
+    df$WEIGHT = df$WTFINL
+  } else if (dep_var == 'LOG_HOURWAGE') {
+    df = filter(df, HOURWAGE != 999.99)
+    df$DEPVAR = log(df$HOURWAGE)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'LOG_EARNWEEK') {
+    df = filter(df, EARNWEEK != 9999.99)
+    df$DEPVAR = log(df$EARNWEEK)
+    df$WEIGHT = df$EARNWT
+  } else if (dep_var == 'OTPAY') {
+    df = filter(df, OTPAY != 99)
+    df$DEPVAR = ifelse(df$OTPAY == 2, 1, 0)
+    df$WEIGHT = df$EARNWT
+  }
+  return(df)
+}
+
+season_to_date = function(df) {
+  df$date = ""
+  for (y in unique(df$YEAR)) {
+    for (s in unique(df$SEASON)) {
+      m = switch(s, "DJF"=2, "MAM"=5, "JJA"=8, "SON"=11)
+      df$date[(df$YEAR == y) & (df$SEAS == s)] = 
+        sprintf("%d-%02d-01", y, m)
+    }
+  }
+  df$date = as.Date(df$date, format="%Y-%m-%d")
+  return(df)
+}
+
+remove_units = function(df) {
+  df = filter(df, !is.na(DEPVAR))
+  unit_set = unique(df$UNIT)
+  for (d in unique(df$date)) {
+    unit_set = intersect(unit_set, filter(df, date == d)$UNIT)
+  }
+  df = filter(df, UNIT %in% unit_set)
+  return(df)
+}
+
+did = function(unit,
+               dep_var,
+               start_year, 
+               treat_year,
+               remove_covid) {
+  if (unit == state) {
+    data = farmer_data
+    treated_set = 6
+  } else if (unit == ind) {
+    data = ca_data
+    treated_set = 1
+  }
+  treat_date = as.Date(sprintf("%d-11-01", treat_year-1), format="%Y-%m-%d")
+  df = filter(data, (IND > 0) &
+                (YEAR >= start_year) &
+                (ASECFLAG %in% c(NA, 2)))
+  if(unit == ind) {
+    for (i in 1:52) {
+      df$IND[df$IND %in% ind_groups[[i]]] = i
+    }
+    df = filter(df, IND %in% c(1,46))
+  }
+  df$UNIT = df[,unit]
+  
+  # Filter out rows with invalid values of dependent variables
+  df = process_dep_var(df, dep_var)
+  
+  # Choose months before COVID
+  if (remove_covid) {
+    df = filter(df, YEAR <= 2020)
+    df = filter(df, (YEAR < 2020) | (MONTH < 3))
+  }
+  
+  # Code in seasons and adjust December to be counted in next year's winter
+  df$date = as.Date(sprintf("%d-%02d-01", df$YEAR, df$MONTH), 
+                    format="%Y-%m-%d")
+  df$SEASON <- mkseas(x = df, width = "DJF")
+  df$YEAR[df$MONTH == 12] = df$YEAR[df$MONTH == 12] + 1
+  
+  # Filter out winter of 2019, due to overlap
+  df = filter(df, (YEAR != treat_year) | (SEASON != "DJF"))
+  
+  # Keep only units which have data for all years
+  df = remove_units(df)
+  
+  # Aggregate by year, season, and unit
+  df$POP = df$WEIGHT
+  df$DEPVAR = df$DEPVAR * df$WEIGHT
+  df = setDT(df)[,lapply(.SD, sum, na.rm=T), by=.(YEAR, SEASON, UNIT)]
+  df$DEPVAR = df$DEPVAR / df$WEIGHT
+  
+  df$TIME1 = ifelse(df$YEAR >= treat_year, 1, 0)
+  df$TIME2 = ifelse(df$YEAR >= treat_year+1, 1, 0)
+  df$TIME3 = ifelse(df$YEAR >= treat_year+2, 1, 0)
+  
+  df$TREAT = ifelse(df$UNIT %in% treated_set, 1, 0)
+  df$TREAT1 = df$TIME1 * df$TREAT
+  df$TREAT2 = df$TIME2 * df$TREAT
+  df$TREAT3 = df$TIME3 * df$TREAT
+  # Run regression
+  reg = df %>%
+    mutate(
+      SEASON = factor(SEASON),
+      UNIT = factor(UNIT),
+      YEAR = factor(YEAR)
+    ) %>%
+    lm_robust(DEPVAR ~ TREAT1 + TREAT2 + TREAT3 + SEASON + UNIT + YEAR, 
+              data=., weights=POP, clusters=UNIT)
+  return(reg)
+}
+
+did(ind, 
+    dep_var='AHRSWORK1',
+    start_year=2016,
+    treat_year=2019,
+    remove_covid=FALSE)
+
+
+
